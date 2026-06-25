@@ -1,17 +1,16 @@
 import { ALERT_LEVEL_ACTION, ALERT_LEVEL_LABEL } from "../lib/waterLevel";
-import type { AlertLogEntry } from "../hooks/useAlertLog";
-import type { DerivedReading } from "../types";
+import type { DerivedReading, SessionHistoryPoint } from "../types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { StatusBadge } from "./ui/StatusBadge";
 import { ListSkeleton } from "./Skeletons";
 
 interface AlertPanelProps {
   reading: DerivedReading | null;
-  log: AlertLogEntry[];
+  history: SessionHistoryPoint[];
   loadState: "loading" | "ready" | "error";
 }
 
-export function AlertPanel({ reading, log, loadState }: AlertPanelProps) {
+export function AlertPanel({ reading, history, loadState }: AlertPanelProps) {
   if (loadState === "loading" || !reading) {
     return <ListSkeleton rows={3} />;
   }
@@ -42,24 +41,24 @@ export function AlertPanel({ reading, log, loadState }: AlertPanelProps) {
         </div>
 
         <p className="mt-5 mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-          Alert History (this session)
+          Reading History
         </p>
-        {log.length === 0 ? (
+        {history.length === 0 ? (
           <p className="rounded-lg bg-neutral-50 px-3 py-4 text-center text-sm text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400">
-            No alert level changes observed yet during this session.
+            No readings recorded yet.
           </p>
         ) : (
-          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
-            {log.map((entry) => (
-              <li key={entry.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="flex items-center gap-2.5">
-                  <StatusBadge level={entry.level} label={ALERT_LEVEL_LABEL[entry.level]} />
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {entry.waterLevelM.toFixed(2)} m &middot; {entry.capacityPct.toFixed(1)}%
+          <ul className="max-h-80 divide-y divide-neutral-100 overflow-y-auto dark:divide-neutral-800">
+            {[...history].reverse().map((point) => (
+              <li key={point.t} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="text-sm font-medium tabular-nums text-neutral-700 dark:text-neutral-200">
+                  {point.distanceM.toFixed(2)} m
+                  <span className="ml-1.5 text-xs font-normal text-neutral-400 dark:text-neutral-500">
+                    to water surface
                   </span>
-                </div>
-                <time className="text-xs text-neutral-400 dark:text-neutral-500">
-                  {new Date(entry.triggeredAtMs).toLocaleString(undefined, {
+                </span>
+                <time className="text-xs tabular-nums text-neutral-400 dark:text-neutral-500">
+                  {new Date(point.t).toLocaleString(undefined, {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",

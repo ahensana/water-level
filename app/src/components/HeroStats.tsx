@@ -1,14 +1,13 @@
 import { motion } from "framer-motion";
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import type { ConnectionState, DerivedReading } from "../types";
+import type { DerivedReading } from "../types";
 import { ALERT_LEVEL_LABEL } from "../lib/waterLevel";
 import { Card } from "./ui/Card";
 import { StatCardSkeleton } from "./Skeletons";
 
 interface HeroStatsProps {
   reading: DerivedReading | null;
-  connection: ConnectionState;
   loadState: "loading" | "ready" | "error";
 }
 
@@ -62,11 +61,11 @@ function StatCard({
   );
 }
 
-export function HeroStats({ reading, connection, loadState }: HeroStatsProps) {
+export function HeroStats({ reading, loadState }: HeroStatsProps) {
   if (loadState === "loading" || !reading) {
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
           <StatCardSkeleton key={i} />
         ))}
       </div>
@@ -74,12 +73,11 @@ export function HeroStats({ reading, connection, loadState }: HeroStatsProps) {
   }
 
   const lastUpdatedLabel = formatRelativeTime(reading.receivedAtMs);
-  const isOnline = connection.deviceConnectivity === "online";
 
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        label="Water Level"
+        label="Water Depth"
         value={reading.waterLevelM.toFixed(2)}
         unit="m"
         accent="primary"
@@ -114,24 +112,26 @@ export function HeroStats({ reading, connection, loadState }: HeroStatsProps) {
         accent="neutral"
         icon={<ClockIcon className="h-5 w-5" />}
       />
-      <StatCard
-        label="Device Status"
-        value={isOnline ? "Online" : "Offline"}
-        accent={isOnline ? "success" : "critical"}
-        icon={<DeviceIcon className="h-5 w-5" />}
-      />
     </div>
   );
 }
 
 function formatRelativeTime(ms: number): string {
-  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  // Guard against missing / zero / implausible timestamps (e.g. epoch 1970 from
+  // a malformed reading), which would otherwise render as "494918h ago".
+  if (!Number.isFinite(ms) || ms <= 0) return "No data";
+
+  const diffSec = Math.floor((Date.now() - ms) / 1000);
+  if (diffSec < 0) return "Just now"; // clock skew / future timestamp
   if (diffSec < 5) return "Just now";
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
-  return `${diffHr}h ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return "Over a month ago";
 }
 
 function GaugeIcon({ className }: { className?: string }) {
@@ -165,14 +165,6 @@ function ClockIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 7.5V12l3 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function DeviceIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
-      <rect x="4" y="3" width="16" height="13" rx="1.5" />
-      <path d="M9 20h6M12 16v4" strokeLinecap="round" />
     </svg>
   );
 }

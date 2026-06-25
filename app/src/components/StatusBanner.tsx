@@ -27,14 +27,6 @@ export function StatusBanner({ loadState, errorMessage, connection }: StatusBann
     return <Banner tone="warning">Reconnecting to the real-time database…</Banner>;
   }
 
-  if (connection.deviceConnectivity === "offline") {
-    return (
-      <Banner tone="warning">
-        Device has not reported in over a minute. It may be powered off or out of network range.
-      </Banner>
-    );
-  }
-
   return null;
 }
 

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import clsx from "clsx";
+import meeclLogo from "../assets/MeECL-Official-LOGO-300x300-1.png";
+import meeclLogoDark from "../assets/logo.png";
 import { ORG_INFO } from "../config";
 import { useClock } from "../hooks/useClock";
 import type { ConnectionState } from "../types";
@@ -9,9 +11,10 @@ interface HeaderProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  onOpenSensor: () => void;
 }
 
-export function Header({ connection, theme, onToggleTheme, onOpenSettings }: HeaderProps) {
+export function Header({ connection, theme, onToggleTheme, onOpenSettings, onOpenSensor }: HeaderProps) {
   const now = useClock();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -35,9 +38,11 @@ export function Header({ connection, theme, onToggleTheme, onOpenSettings }: Hea
       <div className="mx-auto flex h-16 max-w-360 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         {/* Logo + project name */}
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-500 text-white">
-            <DropletIcon className="h-5 w-5" />
-          </div>
+          <img
+            src={theme === "dark" ? meeclLogoDark : meeclLogo}
+            alt={`${ORG_INFO.shortName} logo`}
+            className="h-10 w-10 shrink-0 rounded-lg object-contain"
+          />
           <div className="min-w-0">
             <p className="truncate text-sm font-bold leading-tight text-neutral-900 dark:text-white">
               {ORG_INFO.projectName}
@@ -79,6 +84,15 @@ export function Header({ connection, theme, onToggleTheme, onOpenSettings }: Hea
 
         {/* Right controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            onClick={onOpenSensor}
+            aria-label="Sensor monitoring details"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <SensorIcon className="h-5 w-5" />
+          </button>
+
           <button
             type="button"
             onClick={onOpenSettings}
@@ -157,22 +171,21 @@ export function Header({ connection, theme, onToggleTheme, onOpenSettings }: Hea
   );
 }
 
-function DropletIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M12 2.5c3.5 4.5 7 8.7 7 12.5a7 7 0 1 1-14 0c0-3.8 3.5-8 7-12.5Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
 function BellIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
       <path d="M6 8a6 6 0 1 1 12 0c0 3 1 5 1.5 6H4.5C5 13 6 11 6 8Z" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SensorIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="2" />
+      <path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7" strokeLinecap="round" />
+      <path d="M6 6a8.5 8.5 0 0 0 0 12M18 6a8.5 8.5 0 0 1 0 12" strokeLinecap="round" />
     </svg>
   );
 }

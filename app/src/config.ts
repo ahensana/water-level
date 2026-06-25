@@ -41,21 +41,13 @@ export const SITE_CONFIG = {
 
   /** Firebase Realtime Database path for the editable site config (mount height, thresholds). */
   siteConfigPath: "site_config",
-
-  /** How long session-history points are retained client-side (ms). 24 hours. */
-  sessionHistoryRetentionMs: 24 * 60 * 60 * 1000,
-
-  /** Minimum spacing between recorded session-history points (ms), to avoid over-sampling. */
-  sessionHistorySampleIntervalMs: 30_000,
-
-  /** localStorage key for the persisted session history log. */
-  sessionHistoryStorageKey: "wlms.sessionHistory.v1",
 } as const;
 
 export const ORG_INFO = {
-  name: "Water Resources Department",
+  name: "Meghalaya Energy Corporation Limited",
+  shortName: "MeECL",
   projectName: "Water Level Monitoring System",
   version: "v1.0.0",
-  supportEmail: "support@waterresources.gov",
-  supportPhone: "+1 (800) 555-0142",
+  supportEmail: "support@meecl.in",
+  supportPhone: "+91 364 222 2222",
 } as const;

@@ -1,5 +1,15 @@
 import { initializeApp } from "firebase/app";
-import { getDatabase, goOffline, goOnline, onValue, ref, set } from "firebase/database";
+import {
+  getDatabase,
+  goOffline,
+  goOnline,
+  limitToLast,
+  onValue,
+  orderByKey,
+  query,
+  ref,
+  set,
+} from "firebase/database";
 import { onValue as onConnectedValue } from "firebase/database";
 import type { RawWaterMonitorReading } from "../types";
 
@@ -19,15 +29,55 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
 
+/**
+ * Subscribes to the latest reading.
+ *
+ * The device POSTs each reading, so Firebase stores them as push-keyed children
+ * under `path` rather than overwriting a single record. Push keys are
+ * chronologically sortable, so the last child (orderByKey + limitToLast(1)) is
+ * always the newest reading. We unwrap it and hand the plain reading object to
+ * the caller, so the rest of the app stays agnostic of the storage shape.
+ */
 export function subscribeToWaterMonitor(
   path: string,
   onData: (data: RawWaterMonitorReading | null) => void,
   onError: (error: Error) => void,
 ): () => void {
-  const dataRef = ref(db, path);
+  const latestQuery = query(ref(db, path), orderByKey(), limitToLast(1));
   return onValue(
-    dataRef,
-    (snapshot) => onData(snapshot.val()),
+    latestQuery,
+    (snapshot) => {
+      let latest: RawWaterMonitorReading | null = null;
+      snapshot.forEach((child) => {
+        latest = child.val() as RawWaterMonitorReading;
+      });
+      onData(latest);
+    },
+    (error) => onError(error as Error),
+  );
+}
+
+/**
+ * Subscribes to the most recent `max` readings (oldest-first) for the trend
+ * chart. Each child is a separate POSTed reading, giving real server-side
+ * history that survives refreshes and is shared across devices.
+ */
+export function subscribeToHistory(
+  path: string,
+  max: number,
+  onData: (readings: { key: string; value: RawWaterMonitorReading }[]) => void,
+  onError: (error: Error) => void,
+): () => void {
+  const historyQuery = query(ref(db, path), orderByKey(), limitToLast(max));
+  return onValue(
+    historyQuery,
+    (snapshot) => {
+      const readings: { key: string; value: RawWaterMonitorReading }[] = [];
+      snapshot.forEach((child) => {
+        readings.push({ key: child.key as string, value: child.val() as RawWaterMonitorReading });
+      });
+      onData(readings);
+    },
     (error) => onError(error as Error),
   );
 }

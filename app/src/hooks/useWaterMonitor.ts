@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { SITE_CONFIG, type EditableSiteConfig } from "../config";
-import { subscribeToConnectionState, subscribeToWaterMonitor } from "../lib/firebase";
-import { appendSessionHistory, loadSessionHistory } from "../lib/sessionHistory";
+import {
+  subscribeToConnectionState,
+  subscribeToHistory,
+  subscribeToWaterMonitor,
+} from "../lib/firebase";
 import { deriveReading } from "../lib/waterLevel";
 import type { ConnectionState, DerivedReading, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
+
+/** How many of the most recent device readings to load for the trend chart. */
+const HISTORY_LIMIT = 1000;
 
 export type LoadState = "loading" | "ready" | "error";
 
@@ -26,7 +32,9 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
   const [rawData, setRawData] = useState<{ data: RawWaterMonitorReading; receivedAtMs: number } | null>(
     null,
   );
-  const [history, setHistory] = useState<SessionHistoryPoint[]>(() => loadSessionHistory());
+  // Raw history readings straight from Firebase (oldest-first). Derived into
+  // chart points below so the trend recomputes when site config changes.
+  const [rawHistory, setRawHistory] = useState<RawWaterMonitorReading[]>([]);
   const [firebaseConnected, setFirebaseConnected] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine,
@@ -52,10 +60,21 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
       },
     );
 
+    const unsubscribeHistory = subscribeToHistory(
+      SITE_CONFIG.firebaseDataPath,
+      HISTORY_LIMIT,
+      (readings) => setRawHistory(readings.map((r) => r.value)),
+      () => {
+        // History is non-critical; the live reading still drives the main UI.
+        // Swallow errors here rather than blanking the whole dashboard.
+      },
+    );
+
     const unsubscribeConn = subscribeToConnectionState(setFirebaseConnected);
 
     return () => {
       unsubscribeData();
+      unsubscribeHistory();
       unsubscribeConn();
     };
   }, []);
@@ -84,12 +103,29 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
     return deriveReading(rawData.data, rawData.receivedAtMs, siteConfig);
   }, [rawData, siteConfig]);
 
-  // Append to session history only when a genuinely new reading arrives.
-  useEffect(() => {
-    if (!reading) return;
-    setHistory((prev) => appendSessionHistory(prev, reading));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawData]);
+  // Derive chart points from the Firebase history. Recomputes when new readings
+  // arrive or the operator edits site config (mount height shifts every level).
+  // Drop any non-finite/fault points so the chart and tooltip never choke.
+  const history = useMemo<SessionHistoryPoint[]>(() => {
+    return rawHistory
+      .map((raw) => {
+        const d = deriveReading(raw, Date.now(), siteConfig);
+        return {
+          t: d.receivedAtMs,
+          waterLevelM: d.waterLevelM,
+          capacityPct: d.capacityPct,
+          distanceM: d.distanceM,
+        };
+      })
+      .filter(
+        (p) =>
+          Number.isFinite(p.t) &&
+          Number.isFinite(p.waterLevelM) &&
+          Number.isFinite(p.distanceM) &&
+          Number.isFinite(p.capacityPct),
+      )
+      .sort((a, b) => a.t - b.t);
+  }, [rawHistory, siteConfig]);
 
   const deviceConnectivity =
     reading == null

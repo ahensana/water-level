@@ -82,6 +82,15 @@ body {
   border-radius: 4px;
 }
 
+/* Recharts focuses its SVG surface on click, which draws a browser-default
+   outline (a white box on dark backgrounds). Suppress it - the chart is not
+   an interactive control that needs a focus ring. */
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
 @keyframes pulse-ring {
   0% {
     transform: scale(0.9);

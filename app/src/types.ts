@@ -1,12 +1,23 @@
 /** Raw shape of the `water_monitor` node in Firebase Realtime Database. */
 export interface RawWaterMonitorReading {
+  /** Distance from sensor to water surface (m). Current field written by the firmware. */
+  distance_m?: number;
   depth_cm?: number;
   depth_m?: number;
   status?: string;
+  /**
+   * Human-readable device clock string from the SIM800 network time,
+   * e.g. "24-Jun-2026 16:32:00". Written by the current firmware.
+   */
+  timestamp?: string;
   /** Legacy: a free-text label like "LIVE" or "Just now". Not a real timestamp. */
   updated_at?: string;
   /** Epoch milliseconds when the device recorded this reading. Preferred. */
   timestamp_ms?: number;
+  /** Battery voltage (V) reported by the modem (AT+CBC). Published ~hourly. */
+  battery_voltage?: number;
+  /** GSM signal strength as raw CSQ value, 0–31 (AT+CSQ). Published ~hourly. */
+  signal_strength?: number;
 }
 
 export type AlertLevel = "normal" | "warning" | "critical";
@@ -27,8 +38,12 @@ export interface DerivedReading {
   isSensorFault: boolean;
   /** Timestamp (client-side, ms since epoch) when this reading was received. */
   receivedAtMs: number;
-  /** Raw "updated_at" string supplied by the device, if any. */
+  /** Raw device timestamp/updated_at string supplied by the device, if any. */
   deviceReportedAt: string | null;
+  /** Battery voltage (V) from the device, or null if not reported in this reading. */
+  batteryVoltage: number | null;
+  /** GSM signal strength (raw CSQ 0–31), or null if not reported in this reading. */
+  signalStrength: number | null;
 }
 
 export interface SessionHistoryPoint {

@@ -28,11 +28,11 @@ export function deriveReading(
   const capacityPct = clamp((waterLevelM / siteConfig.sensorMountHeightM) * 100, 0, 100);
 
   // Prefer a real device timestamp so "Last Updated" reflects true sensor age
-  // and survives page refreshes. Fall back to the browser receive-time only
-  // when the device hasn't published a numeric timestamp_ms yet.
-  const hasDeviceTime =
-    typeof raw.timestamp_ms === "number" && Number.isFinite(raw.timestamp_ms);
-  const effectiveTimeMs = hasDeviceTime ? (raw.timestamp_ms as number) : receivedAtMs;
+  // and survives page refreshes. The current firmware publishes a human-readable
+  // clock string ("24-Jun-2026 16:32:00"); older payloads used a numeric
+  // timestamp_ms. Fall back to the browser receive-time when neither is present.
+  const deviceTimeMs = resolveDeviceTimeMs(raw);
+  const effectiveTimeMs = deviceTimeMs ?? receivedAtMs;
 
   return {
     distanceM,
@@ -41,15 +41,77 @@ export function deriveReading(
     alertLevel: classifyAlertLevel(capacityPct, siteConfig),
     isSensorFault,
     receivedAtMs: effectiveTimeMs,
-    deviceReportedAt: raw.updated_at ?? null,
+    deviceReportedAt: raw.timestamp ?? raw.updated_at ?? null,
+    batteryVoltage:
+      typeof raw.battery_voltage === "number" && Number.isFinite(raw.battery_voltage)
+        ? raw.battery_voltage
+        : null,
+    signalStrength:
+      typeof raw.signal_strength === "number" && Number.isFinite(raw.signal_strength)
+        ? raw.signal_strength
+        : null,
   };
 }
 
-/** Accepts either depth_m (preferred) or depth_cm (legacy field) from the device payload. */
+/**
+ * Accepts distance_m (current firmware), depth_m, or depth_cm (legacy fields)
+ * from the device payload.
+ */
 function resolveDistanceMeters(raw: RawWaterMonitorReading): number {
+  if (typeof raw.distance_m === "number") return raw.distance_m;
   if (typeof raw.depth_m === "number") return raw.depth_m;
   if (typeof raw.depth_cm === "number") return raw.depth_cm / 100;
   return NaN;
+}
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * Resolves a device-reported time (epoch ms) from whichever timestamp field the
+ * payload carries. Returns null if no parseable device time is present, so the
+ * caller can fall back to the browser receive-time.
+ *
+ * The firmware emits the SIM800 network clock as "DD-Mon-YYYY HH:MM:SS", e.g.
+ * "24-Jun-2026 16:32:00", in local network time (no timezone in the string), so
+ * we parse it as local time.
+ */
+function resolveDeviceTimeMs(raw: RawWaterMonitorReading): number | null {
+  if (typeof raw.timestamp_ms === "number" && Number.isFinite(raw.timestamp_ms)) {
+    return raw.timestamp_ms;
+  }
+
+  if (typeof raw.timestamp === "string") {
+    const parsed = parseDeviceTimestamp(raw.timestamp);
+    if (parsed !== null) return parsed;
+  }
+
+  return null;
+}
+
+/** Parses "DD-Mon-YYYY HH:MM:SS" (local time) into epoch ms, or null if unparseable. */
+function parseDeviceTimestamp(value: string): number | null {
+  const match = value
+    .trim()
+    .match(/^(\d{2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (!match) return null;
+
+  const [, dd, mon, yyyy, hh, mm, ss] = match;
+  const monthIndex = MONTHS.indexOf(mon);
+  if (monthIndex === -1) return null;
+
+  const date = new Date(
+    Number(yyyy),
+    monthIndex,
+    Number(dd),
+    Number(hh),
+    Number(mm),
+    Number(ss),
+  );
+  const ms = date.getTime();
+  return Number.isFinite(ms) ? ms : null;
 }
 
 export function classifyAlertLevel(capacityPct: number, siteConfig: EditableSiteConfig): AlertLevel {
@@ -59,6 +121,9 @@ export function classifyAlertLevel(capacityPct: number, siteConfig: EditableSite
 }
 
 export function clamp(value: number, min: number, max: number): number {
+  // Treat non-finite input (NaN from a missing/null Firebase field) as the
+  // minimum, so derived values are always real numbers and never crash the UI.
+  if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
 }
 

@@ -114,31 +114,26 @@ export function GaugeCard({ reading, connection, loadState, siteConfig }: GaugeC
           </div>
         </div>
 
-        <div className="grid w-full grid-cols-1 gap-3 sm:max-w-xs">
-          <ZoneRow color={ZONE_COLORS.normal} label="Safe Zone" range={`0% – ${siteConfig.warningThresholdPct}%`} active={reading.alertLevel === "normal"} />
-          <ZoneRow
-            color={ZONE_COLORS.warning}
-            label="Warning Zone"
-            range={`${siteConfig.warningThresholdPct}% – ${siteConfig.criticalThresholdPct}%`}
-            active={reading.alertLevel === "warning"}
-          />
-          <ZoneRow
-            color={ZONE_COLORS.critical}
-            label="Critical Zone"
-            range={`Above ${siteConfig.criticalThresholdPct}%`}
-            active={reading.alertLevel === "critical"}
-          />
-          <div className="mt-2 flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm dark:bg-neutral-800/60">
-            <span className="text-neutral-500 dark:text-neutral-400">Sensor Status</span>
-            <span
-              className={
-                reading.isSensorFault
-                  ? "font-semibold text-critical-600 dark:text-critical-500"
-                  : "font-semibold text-success-600 dark:text-success-500"
-              }
-            >
-              {reading.isSensorFault ? "Fault Detected" : "Reading Valid"}
-            </span>
+        <div className="flex w-full flex-col gap-5 sm:max-w-sm">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              Threshold Zones
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              <ZoneRow color={ZONE_COLORS.normal} label="Safe Zone" range={`0% – ${siteConfig.warningThresholdPct}%`} active={reading.alertLevel === "normal"} />
+              <ZoneRow
+                color={ZONE_COLORS.warning}
+                label="Warning Zone"
+                range={`${siteConfig.warningThresholdPct}% – ${siteConfig.criticalThresholdPct}%`}
+                active={reading.alertLevel === "warning"}
+              />
+              <ZoneRow
+                color={ZONE_COLORS.critical}
+                label="Critical Zone"
+                range={`Above ${siteConfig.criticalThresholdPct}%`}
+                active={reading.alertLevel === "critical"}
+              />
+            </div>
           </div>
         </div>
       </CardBody>
@@ -159,17 +154,28 @@ function ZoneRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${
+      className={`relative flex items-center justify-between overflow-hidden rounded-lg border px-3 py-2 transition-colors ${
         active
           ? "border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/60"
-          : "border-transparent"
+          : "border-neutral-200/60 dark:border-neutral-800"
       }`}
     >
+      {active && (
+        <span className="absolute inset-y-0 left-0 w-1 rounded-r" style={{ backgroundColor: color }} />
+      )}
       <div className="flex items-center gap-2">
         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-200">{label}</span>
+        <span
+          className={`text-sm font-medium ${
+            active
+              ? "text-neutral-900 dark:text-white"
+              : "text-neutral-700 dark:text-neutral-300"
+          }`}
+        >
+          {label}
+        </span>
       </div>
-      <span className="text-xs text-neutral-500 dark:text-neutral-400">{range}</span>
+      <span className="text-xs font-medium tabular-nums text-neutral-500 dark:text-neutral-400">{range}</span>
     </div>
   );
 }

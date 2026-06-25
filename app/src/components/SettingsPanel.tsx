@@ -69,6 +69,8 @@ export function SettingsPanel({
     try {
       await onSave({ sensorMountHeightM: mountHeightM, warningThresholdPct, criticalThresholdPct });
       setSavedJustNow(true);
+      window.alert("Settings saved successfully.");
+      onClose();
     } catch {
       // saveError is surfaced via props
     }
@@ -83,7 +85,7 @@ export function SettingsPanel({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/70 p-4 backdrop-blur-sm"
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -93,9 +95,9 @@ export function SettingsPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
-        className="w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-neutral-900"
+        className="w-full max-w-md rounded-xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-neutral-800 dark:ring-white/10"
       >
-        <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-neutral-700">
           <h2 id={headingId} className="text-sm font-semibold text-neutral-900 dark:text-white">
             Site Configuration
           </h2>
@@ -103,7 +105,7 @@ export function SettingsPanel({
             type="button"
             onClick={onClose}
             aria-label="Close settings"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-700"
           >
             <CloseIcon className="h-4 w-4" />
           </button>
@@ -111,14 +113,12 @@ export function SettingsPanel({
 
         <form onSubmit={handleSubmit} className="px-5 py-5">
           <p className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
-            These values are stored in Firebase and shared with every dashboard viewing this
-            site. They are not measured automatically — enter the real physical mounting height
-            of the sensor above the empty vessel floor.
+            Enter the water depth at full capacity. This sets the 100% mark for all readings.
           </p>
 
           <label className="mb-3 block">
             <span className="mb-1 block text-xs font-medium text-neutral-700 dark:text-neutral-300">
-              Sensor mount height (m)
+              Water depth (m)
             </span>
             <input
               type="number"
@@ -127,7 +127,7 @@ export function SettingsPanel({
               required
               value={mountHeight}
               onChange={(e) => setMountHeight(e.target.value)}
-              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-primary-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-primary-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-white"
             />
           </label>
 
@@ -144,7 +144,7 @@ export function SettingsPanel({
                 required
                 value={warningPct}
                 onChange={(e) => setWarningPct(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-primary-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-primary-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-white"
               />
             </label>
             <label className="block">
@@ -159,7 +159,7 @@ export function SettingsPanel({
                 required
                 value={criticalPct}
                 onChange={(e) => setCriticalPct(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-primary-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 focus:border-primary-500 dark:border-neutral-600 dark:bg-neutral-900 dark:text-white"
               />
             </label>
           </div>
@@ -198,7 +198,7 @@ export function SettingsPanel({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
               >
                 Cancel
               </button>

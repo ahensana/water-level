@@ -4,7 +4,6 @@ import {
   AreaChart,
   Brush,
   CartesianGrid,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -24,10 +23,71 @@ const RANGE_OPTIONS: { key: RangeKey; label: string; windowMs: number }[] = [
   { key: "30d", label: "Monthly", windowMs: 30 * 24 * 60 * 60 * 1000 },
 ];
 
+/**
+ * Produces a clean Y axis: a domain max with headroom above the mount height,
+ * rounded up to a "nice" step, plus evenly-spaced ticks at that step. This keeps
+ * the axis ordered and readable for any mount height (3 m, 20 m, etc.).
+ */
+function buildYAxis(mountHeightM: number): { yMax: number; yTicks: number[] } {
+  const withHeadroom = mountHeightM * 1.35;
+  const step = niceStep(withHeadroom / 4); // aim for ~4-5 ticks
+  const yMax = Math.ceil(withHeadroom / step) * step;
+  const yTicks: number[] = [];
+  for (let v = 0; v <= yMax + 1e-9; v += step) {
+    yTicks.push(Number(v.toFixed(2)));
+  }
+  return { yMax, yTicks };
+}
+
+/** Rounds a raw step up to the nearest 1-2-5 x 10^n "nice" value. */
+function niceStep(raw: number): number {
+  if (raw <= 0) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / pow;
+  const niceNorm = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return niceNorm * pow;
+}
+
 interface TrendChartProps {
   history: SessionHistoryPoint[];
   loadState: "loading" | "ready" | "error";
   siteConfig: EditableSiteConfig;
+}
+
+interface TooltipPoint {
+  label: string;
+  waterLevelM: number;
+  distanceM: number;
+}
+
+/** Custom tooltip: hovering the Water Level line also reveals the sensor distance. */
+function LevelTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { payload: TooltipPoint }[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0].payload;
+  const fmt = (v: number) => (Number.isFinite(v) ? `${v.toFixed(2)} m` : "—");
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-md dark:border-neutral-700 dark:bg-neutral-900">
+      <p className="mb-1 font-medium text-neutral-500 dark:text-neutral-400">{point.label}</p>
+      <p className="flex items-center justify-between gap-4">
+        <span className="text-primary-600 dark:text-primary-400">Water Level</span>
+        <span className="font-semibold tabular-nums text-neutral-900 dark:text-white">
+          {fmt(point.waterLevelM)}
+        </span>
+      </p>
+      <p className="flex items-center justify-between gap-4">
+        <span className="text-neutral-500 dark:text-neutral-400">Sensor Distance</span>
+        <span className="font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
+          {fmt(point.distanceM)}
+        </span>
+      </p>
+    </div>
+  );
 }
 
 export function TrendChart({ history, loadState, siteConfig }: TrendChartProps) {
@@ -50,6 +110,13 @@ export function TrendChart({ history, loadState, siteConfig }: TrendChartProps) 
         }),
       }));
   }, [history, windowMs]);
+
+  // Build an explicit, evenly-spaced, round Y-axis instead of letting Recharts
+  // auto-pick ticks - with a non-round domain max (e.g. mountHeight * 1.45) its
+  // tick generator can produce out-of-order / uneven labels.
+  const { yMax, yTicks } = useMemo(() => buildYAxis(siteConfig.sensorMountHeightM), [
+    siteConfig.sensorMountHeightM,
+  ]);
 
   const handleExport = async (type: "png" | "pdf") => {
     if (!containerRef.current) return;
@@ -116,23 +183,30 @@ export function TrendChart({ history, loadState, siteConfig }: TrendChartProps) 
       </CardHeader>
       <CardBody>
         <div ref={containerRef} className="bg-white dark:bg-neutral-900">
-          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-            Live session history recorded since this dashboard was opened. Not a server-side
-            historical archive.
-          </p>
           {data.length < 2 ? (
-            <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
+            <div className="flex h-105 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
-                Collecting readings…
+                {history.length === 0 ? "No readings yet" : "Not enough data in this range"}
               </p>
               <p className="max-w-xs text-xs text-neutral-500 dark:text-neutral-400">
-                The trend chart populates as new readings arrive from the sensor. Keep this
-                dashboard open to build up a session history.
+                {history.length === 0
+                  ? "The trend chart populates automatically as the sensor reports readings."
+                  : "Fewer than two readings fall within the selected time range. Try a wider range, or wait for more readings to arrive."}
               </p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+            <div className="relative">
+              {/* Sensor is mounted at the top of the water column (max level), so its
+                  marker sits at the top-left of the plot, by the highest Y value. */}
+              <div
+                className="pointer-events-none absolute left-12 top-1 z-10 flex items-center gap-1 text-neutral-400 dark:text-neutral-500"
+                title={`Sensor mounted at ${siteConfig.sensorMountHeightM.toFixed(2)} m`}
+              >
+                <SensorIcon className="h-4 w-4" />
+                <span className="text-[10px] font-medium uppercase tracking-wide">Sensor</span>
+              </div>
+              <ResponsiveContainer width="100%" height={420}>
+                <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 4 }}>
                 <defs>
                   <linearGradient id="levelFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#0f62fe" stopOpacity={0.25} />
@@ -148,35 +222,22 @@ export function TrendChart({ history, loadState, siteConfig }: TrendChartProps) 
                   minTickGap={24}
                 />
                 <YAxis
+                  type="number"
                   tick={{ fontSize: 11, fill: "#64748b" }}
                   tickLine={false}
                   axisLine={false}
-                  domain={[0, siteConfig.sensorMountHeightM]}
-                  width={36}
+                  domain={[0, yMax]}
+                  ticks={yTicks}
+                  allowDecimals={false}
+                  interval={0}
+                  tickFormatter={(value: number) => `${value} m`}
+                  width={52}
                 />
-                <ReferenceLine
-                  y={(siteConfig.warningThresholdPct / 100) * siteConfig.sensorMountHeightM}
-                  stroke="#f59e0b"
-                  strokeDasharray="4 4"
-                  label={{ value: "Warning", position: "insideTopRight", fontSize: 10, fill: "#b45309" }}
-                />
-                <ReferenceLine
-                  y={(siteConfig.criticalThresholdPct / 100) * siteConfig.sensorMountHeightM}
-                  stroke="#ef4444"
-                  strokeDasharray="4 4"
-                  label={{ value: "Critical", position: "insideTopRight", fontSize: 10, fill: "#b91c1c" }}
-                />
-                <Tooltip
-                  formatter={(value) => [`${Number(value).toFixed(2)} m`, "Water Level"]}
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: "1px solid #e2e8f0",
-                    fontSize: 12,
-                  }}
-                />
+                <Tooltip content={<LevelTooltip />} />
                 <Area
                   type="monotone"
                   dataKey="waterLevelM"
+                  name="Water Level"
                   stroke="#0f62fe"
                   strokeWidth={2}
                   fill="url(#levelFill)"
@@ -188,11 +249,23 @@ export function TrendChart({ history, loadState, siteConfig }: TrendChartProps) 
                   travellerWidth={8}
                   fill="#f8fafc"
                 />
-              </AreaChart>
-            </ResponsiveContainer>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
       </CardBody>
     </Card>
+  );
+}
+
+function SensorIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <rect x="6" y="3" width="12" height="7" rx="1.5" />
+      <path d="M9 10v2M12 10v2M15 10v2" strokeLinecap="round" />
+      <path d="M8 16c1.2 1 2.8 1 4 0s2.8-1 4 0" strokeLinecap="round" />
+      <path d="M7 19.5c1.4 1.2 3.2 1.2 5 0s3.6-1.2 5 0" strokeLinecap="round" />
+    </svg>
   );
 }
