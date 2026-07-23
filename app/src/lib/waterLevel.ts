@@ -41,7 +41,7 @@ export function deriveReading(
     alertLevel: classifyAlertLevel(capacityPct, siteConfig),
     isSensorFault,
     receivedAtMs: effectiveTimeMs,
-    deviceReportedAt: raw.timestamp ?? raw.updated_at ?? null,
+    deviceReportedAt: formatDeviceReportedAt(raw),
     batteryVoltage:
       typeof raw.battery_voltage === "number" && Number.isFinite(raw.battery_voltage)
         ? raw.battery_voltage
@@ -50,14 +50,30 @@ export function deriveReading(
       typeof raw.signal_strength === "number" && Number.isFinite(raw.signal_strength)
         ? raw.signal_strength
         : null,
+    pressureHpa: resolvePressure(raw.pressure),
+    remotePressureHpa: resolvePressure(raw.remote_pressure),
   };
 }
 
 /**
- * Accepts distance_m (current firmware), depth_m, or depth_cm (legacy fields)
- * from the device payload.
+ * Normalises a pressure field (hPa) to a finite positive number or null. The
+ * firmware writes -1 when a sensor is unavailable (e.g. no BMP280 detected, or
+ * no remote LoRa data yet), so treat non-positive values as "not reported".
+ */
+function resolvePressure(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Resolves the sensor-to-water distance in METRES from whichever field the
+ * payload carries.
+ *
+ * The current firmware writes `distance` in CENTIMETRES, so that takes priority
+ * and is converted to metres. The remaining fields are legacy metre/cm variants
+ * kept for backward compatibility with older stored readings.
  */
 function resolveDistanceMeters(raw: RawWaterMonitorReading): number {
+  if (typeof raw.distance === "number") return raw.distance / 100;
   if (typeof raw.distance_m === "number") return raw.distance_m;
   if (typeof raw.depth_m === "number") return raw.depth_m;
   if (typeof raw.depth_cm === "number") return raw.depth_cm / 100;
@@ -83,12 +99,30 @@ function resolveDeviceTimeMs(raw: RawWaterMonitorReading): number | null {
     return raw.timestamp_ms;
   }
 
+  // Current firmware: numeric Firebase server timestamp in epoch milliseconds.
+  if (typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)) {
+    return raw.timestamp;
+  }
+
   if (typeof raw.timestamp === "string") {
     const parsed = parseDeviceTimestamp(raw.timestamp);
     if (parsed !== null) return parsed;
   }
 
   return null;
+}
+
+/**
+ * Builds the human-readable "device reported at" string shown in the UI. A
+ * numeric epoch-ms timestamp is formatted to a locale string; a string timestamp
+ * is passed through as-is; otherwise falls back to the legacy `updated_at`.
+ */
+function formatDeviceReportedAt(raw: RawWaterMonitorReading): string | null {
+  if (typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)) {
+    return new Date(raw.timestamp).toLocaleString();
+  }
+  if (typeof raw.timestamp === "string") return raw.timestamp;
+  return raw.updated_at ?? null;
 }
 
 /** Parses "DD-Mon-YYYY HH:MM:SS" (local time) into epoch ms, or null if unparseable. */

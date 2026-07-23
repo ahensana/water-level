@@ -1,5 +1,5 @@
 import { useEffect, useId } from "react";
-import { SITE_CONFIG } from "../config";
+import { SITE_CONFIG, type EditableSiteConfig } from "../config";
 import type { ConnectionState, DerivedReading } from "../types";
 
 interface SensorCardProps {
@@ -8,6 +8,8 @@ interface SensorCardProps {
   reading: DerivedReading | null;
   connection: ConnectionState;
   loadState: "loading" | "ready" | "error";
+  /** Accepted for call-site compatibility; sensor readings here don't depend on it. */
+  siteConfig?: EditableSiteConfig;
 }
 
 export function SensorCard({ open, onClose, reading, connection, loadState }: SensorCardProps) {
@@ -103,6 +105,18 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
                   tone={reading!.batteryVoltage !== null && reading!.batteryVoltage < 3.5 ? "critical" : undefined}
                 />
                 <Field label="Signal" value={formatSignal(reading!.signalStrength)} />
+                <Field
+                  label="Atmospheric Pressure"
+                  value={reading!.pressureHpa !== null ? `${reading!.pressureHpa.toFixed(2)} hPa` : "—"}
+                />
+                <Field
+                  label="LoRa Pressure (Node A)"
+                  value={
+                    reading!.remotePressureHpa !== null
+                      ? `${reading!.remotePressureHpa.toFixed(2)} hPa`
+                      : "—"
+                  }
+                />
               </dl>
               <p className="mt-4 border-t border-neutral-200 pt-3 text-xs text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
                 The device reports battery and signal about once an hour, so these update less

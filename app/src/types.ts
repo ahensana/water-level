@@ -1,15 +1,26 @@
-/** Raw shape of the `water_monitor` node in Firebase Realtime Database. */
+/** Raw shape of a reading under `water_monitor/current` in Firebase Realtime Database. */
 export interface RawWaterMonitorReading {
-  /** Distance from sensor to water surface (m). Current field written by the firmware. */
+  /**
+   * Distance from sensor to water surface, in CENTIMETRES. This is the field the
+   * current firmware writes (ultrasonic reading). Preferred over the legacy
+   * metre-based fields below.
+   */
+  distance?: number;
+  /** Local BMP280 barometric pressure (hPa) at the gateway node. Current firmware. */
+  pressure?: number;
+  /** Remote pressure (hPa) relayed from Node A over LoRa. May be absent / -1 if no remote data. */
+  remote_pressure?: number;
+  /** Legacy: distance from sensor to water surface (m). */
   distance_m?: number;
   depth_cm?: number;
   depth_m?: number;
   status?: string;
   /**
-   * Human-readable device clock string from the SIM800 network time,
-   * e.g. "24-Jun-2026 16:32:00". Written by the current firmware.
+   * Device time. The current firmware writes a numeric epoch-milliseconds value
+   * (Firebase server timestamp). Older payloads used a human-readable clock string
+   * such as "24-Jun-2026 16:32:00".
    */
-  timestamp?: string;
+  timestamp?: string | number;
   /** Legacy: a free-text label like "LIVE" or "Just now". Not a real timestamp. */
   updated_at?: string;
   /** Epoch milliseconds when the device recorded this reading. Preferred. */
@@ -44,6 +55,10 @@ export interface DerivedReading {
   batteryVoltage: number | null;
   /** GSM signal strength (raw CSQ 0–31), or null if not reported in this reading. */
   signalStrength: number | null;
+  /** Local barometric pressure (hPa) at the gateway node, or null if not reported. */
+  pressureHpa: number | null;
+  /** Remote pressure (hPa) relayed from Node A over LoRa, or null if not reported. */
+  remotePressureHpa: number | null;
 }
 
 export interface SessionHistoryPoint {

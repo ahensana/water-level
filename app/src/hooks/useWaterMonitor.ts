@@ -6,10 +6,19 @@ import {
   subscribeToWaterMonitor,
 } from "../lib/firebase";
 import { deriveReading } from "../lib/waterLevel";
-import type { ConnectionState, DerivedReading, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
+import type {
+  ConnectionState,
+  DerivedReading,
+  RawWaterMonitorReading,
+  SessionHistoryPoint,
+} from "../types";
 
-/** How many of the most recent device readings to load for the trend chart. */
-const HISTORY_LIMIT = 1000;
+/**
+ * How many of the most recent server-stored readings to load for the trend
+ * chart. The firmware POSTs one keyed child per reading (~every 30s), so this
+ * caps the fetch: 5000 readings ≈ the last ~40 hours of continuous operation.
+ */
+const HISTORY_LIMIT = 5000;
 
 export type LoadState = "loading" | "ready" | "error";
 
@@ -32,8 +41,11 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
   const [rawData, setRawData] = useState<{ data: RawWaterMonitorReading; receivedAtMs: number } | null>(
     null,
   );
-  // Raw history readings straight from Firebase (oldest-first). Derived into
-  // chart points below so the trend recomputes when site config changes.
+  // Full server-side history (oldest-first), fetched live from Firebase. Each
+  // record is a keyed child the firmware POSTed under water_monitor/current, so
+  // this is every reading ever stored - shared across devices and surviving
+  // refreshes. Derived into chart points below so the trend recomputes when
+  // site config changes.
   const [rawHistory, setRawHistory] = useState<RawWaterMonitorReading[]>([]);
   const [firebaseConnected, setFirebaseConnected] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(
@@ -60,6 +72,7 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
       },
     );
 
+    // Fetch (and stay subscribed to) the full server history for the trend chart.
     const unsubscribeHistory = subscribeToHistory(
       SITE_CONFIG.firebaseDataPath,
       HISTORY_LIMIT,
@@ -103,9 +116,11 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
     return deriveReading(rawData.data, rawData.receivedAtMs, siteConfig);
   }, [rawData, siteConfig]);
 
-  // Derive chart points from the Firebase history. Recomputes when new readings
-  // arrive or the operator edits site config (mount height shifts every level).
-  // Drop any non-finite/fault points so the chart and tooltip never choke.
+  // Derive chart points from the full server history. Recomputes when new
+  // readings arrive or the operator edits site config (mount height shifts every
+  // level). Each record carries its own device timestamp, so deriveReading uses
+  // that for the x-axis; Date.now() is only a fallback for records with no
+  // timestamp. Drop any non-finite/fault points so the chart never chokes.
   const history = useMemo<SessionHistoryPoint[]>(() => {
     return rawHistory
       .map((raw) => {

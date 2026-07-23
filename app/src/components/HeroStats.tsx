@@ -26,6 +26,7 @@ function StatCard({
   icon,
   accent,
   hint,
+  valueClassName,
 }: {
   label: string;
   value: string;
@@ -33,6 +34,8 @@ function StatCard({
   icon: ReactNode;
   accent: keyof typeof ACCENT_BG;
   hint?: string;
+  /** Overrides the default value typography (e.g. a smaller size for long text like a date). */
+  valueClassName?: string;
 }) {
   return (
     <Card className="p-5">
@@ -50,7 +53,10 @@ function StatCard({
           initial={{ opacity: 0.4, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="text-2xl font-bold tabular-nums text-neutral-900 dark:text-white"
+          className={clsx(
+            "font-bold text-neutral-900 dark:text-white",
+            valueClassName ?? "text-2xl tabular-nums",
+          )}
         >
           {value}
         </motion.span>
@@ -64,18 +70,19 @@ function StatCard({
 export function HeroStats({ reading, loadState }: HeroStatsProps) {
   if (loadState === "loading" || !reading) {
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
           <StatCardSkeleton key={i} />
         ))}
       </div>
     );
   }
 
-  const lastUpdatedLabel = formatRelativeTime(reading.receivedAtMs);
+  const lastUpdatedAbsolute = formatAbsoluteTime(reading.receivedAtMs);
+  const lastUpdatedRelative = formatRelativeTime(reading.receivedAtMs);
 
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
       <StatCard
         label="Water Depth"
         value={reading.waterLevelM.toFixed(2)}
@@ -107,13 +114,43 @@ export function HeroStats({ reading, loadState }: HeroStatsProps) {
         hint={ALERT_LEVEL_LABEL[reading.alertLevel]}
       />
       <StatCard
+        label="Atmospheric Pressure"
+        value={reading.pressureHpa !== null ? reading.pressureHpa.toFixed(1) : "—"}
+        unit={reading.pressureHpa !== null ? "hPa" : undefined}
+        accent="neutral"
+        icon={<PressureIcon className="h-5 w-5" />}
+        hint={
+          reading.remotePressureHpa !== null
+            ? `LoRa (Node A): ${reading.remotePressureHpa.toFixed(1)} hPa`
+            : "Measured at gateway · LoRa: —"
+        }
+      />
+      <StatCard
         label="Last Updated"
-        value={lastUpdatedLabel}
+        value={lastUpdatedAbsolute}
         accent="neutral"
         icon={<ClockIcon className="h-5 w-5" />}
+        hint={lastUpdatedRelative}
+        valueClassName="text-base leading-snug tabular-nums"
       />
     </div>
   );
+}
+
+/**
+ * Formats an epoch-ms timestamp as an exact local date and time, e.g.
+ * "23 Jul 2026, 10:21:07". Returns "No data" for missing/implausible values.
+ */
+function formatAbsoluteTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "No data";
+  return new Date(ms).toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function formatRelativeTime(ms: number): string {
@@ -157,6 +194,16 @@ function PercentIcon({ className }: { className?: string }) {
       <circle cx="7" cy="7" r="2.5" />
       <circle cx="17" cy="17" r="2.5" />
       <path d="M18 6 6 18" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PressureIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M12 21a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z" opacity="0" />
+      <path d="M4 13a8 8 0 1 1 16 0" strokeLinecap="round" />
+      <path d="M12 13 15 8" strokeLinecap="round" />
+      <circle cx="12" cy="13" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   );
 }

@@ -36,8 +36,13 @@ export const SITE_CONFIG = {
   /** Device is considered Offline if no reading has been received within this window (ms). */
   offlineTimeoutMs: 90_000,
 
-  /** Firebase Realtime Database path for the live reading. */
-  firebaseDataPath: "water_monitor",
+  /**
+   * Firebase Realtime Database path for the live reading.
+   * The firmware POSTs to `.../water_monitor/current.json`, so Firebase stores
+   * each reading as a push-keyed child under `water_monitor/current`. We read the
+   * newest child from here (see subscribeToWaterMonitor).
+   */
+  firebaseDataPath: "water_monitor/current",
 
   /** Firebase Realtime Database path for the editable site config (mount height, thresholds). */
   siteConfigPath: "site_config",
