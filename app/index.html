@@ -13,6 +13,20 @@
       rel="stylesheet"
     />
     <title>Water Level Monitoring System</title>
+    <script>
+      // Applies the theme before first paint. useTheme sets this class too, but
+      // only in an effect - by then the page has already painted, so without
+      // this the dark default flashes white on every load. Keep the key and the
+      // fallback in sync with src/hooks/useTheme.ts.
+      (function () {
+        try {
+          var stored = localStorage.getItem("wlms.theme");
+          if (stored !== "light") document.documentElement.classList.add("dark");
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

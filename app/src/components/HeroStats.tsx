@@ -119,11 +119,6 @@ export function HeroStats({ reading, loadState }: HeroStatsProps) {
         unit={reading.pressureHpa !== null ? "hPa" : undefined}
         accent="neutral"
         icon={<PressureIcon className="h-5 w-5" />}
-        hint={
-          reading.remotePressureHpa !== null
-            ? `LoRa (Node A): ${reading.remotePressureHpa.toFixed(1)} hPa`
-            : "Measured at gateway · LoRa: —"
-        }
       />
       <StatCard
         label="Last Updated"

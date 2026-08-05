@@ -51,29 +51,41 @@ export function deriveReading(
         ? raw.signal_strength
         : null,
     pressureHpa: resolvePressure(raw.pressure),
+    temperatureC: resolveFinite(raw.temperature),
+    heightM: resolveFinite(raw.height),
     remotePressureHpa: resolvePressure(raw.remote_pressure),
   };
 }
 
 /**
- * Normalises a pressure field (hPa) to a finite positive number or null. The
- * firmware writes -1 when a sensor is unavailable (e.g. no BMP280 detected, or
- * no remote LoRa data yet), so treat non-positive values as "not reported".
+ * Normalises a pressure field (hPa) to a finite positive number or null. Older
+ * firmware wrote -1 when a sensor was unavailable, so treat non-positive values
+ * as "not reported". The current firmware omits the field entirely instead.
  */
 function resolvePressure(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 /**
+ * Normalises a signed measurement to a finite number or null. Unlike pressure,
+ * temperature and baseline-relative height are legitimately zero or negative, so
+ * only non-finite/missing values count as "not reported".
+ */
+function resolveFinite(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
  * Resolves the sensor-to-water distance in METRES from whichever field the
  * payload carries.
  *
- * The current firmware writes `distance` in CENTIMETRES, so that takes priority
- * and is converted to metres. The remaining fields are legacy metre/cm variants
- * kept for backward compatibility with older stored readings.
+ * The current firmware (A01NYUB ultrasonic) writes `distance` in MILLIMETRES,
+ * so that takes priority and is converted to metres. The remaining fields are
+ * legacy metre/cm variants kept for backward compatibility with older stored
+ * readings.
  */
 function resolveDistanceMeters(raw: RawWaterMonitorReading): number {
-  if (typeof raw.distance === "number") return raw.distance / 100;
+  if (typeof raw.distance === "number") return raw.distance / 1000;
   if (typeof raw.distance_m === "number") return raw.distance_m;
   if (typeof raw.depth_m === "number") return raw.depth_m;
   if (typeof raw.depth_cm === "number") return raw.depth_cm / 100;

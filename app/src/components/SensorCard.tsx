@@ -110,18 +110,19 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
                   value={reading!.pressureHpa !== null ? `${reading!.pressureHpa.toFixed(2)} hPa` : "—"}
                 />
                 <Field
-                  label="LoRa Pressure (Node A)"
-                  value={
-                    reading!.remotePressureHpa !== null
-                      ? `${reading!.remotePressureHpa.toFixed(2)} hPa`
-                      : "—"
-                  }
+                  label="Temperature"
+                  value={reading!.temperatureC !== null ? `${reading!.temperatureC.toFixed(1)} °C` : "—"}
+                />
+                <Field
+                  label="Height vs Baseline"
+                  value={reading!.heightM !== null ? `${reading!.heightM.toFixed(2)} m` : "—"}
                 />
               </dl>
               <p className="mt-4 border-t border-neutral-200 pt-3 text-xs text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
-                The device reports battery and signal about once an hour, so these update less
-                often than the water level. A “—” simply means the most recent reading hasn’t
-                refreshed them yet.
+                A “—” means the current device isn’t reporting that value. Battery and signal
+                require modem telemetry the present firmware doesn’t publish; temperature,
+                pressure and height come from the BMP280 and read “—” if it wasn’t detected
+                at boot.
               </p>
             </>
           )}

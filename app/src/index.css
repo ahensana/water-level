@@ -115,6 +115,19 @@ body {
   animation: pulse-ring 1.8s cubic-bezier(0.2, 0, 0.2, 1) infinite;
 }
 
+/* Surface swell for the water-level trend chart. Each wave layer is drawn one
+   wavelength wider than the plot on both sides and slides exactly one
+   wavelength, so the sine lines up with itself and the loop is seamless. The
+   distance is set per-layer via --wave-shift. */
+@keyframes water-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--wave-shift));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

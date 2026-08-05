@@ -4,11 +4,16 @@ type Theme = "light" | "dark";
 
 const STORAGE_KEY = "wlms.theme";
 
+/*
+ * Dark is the product default rather than a mirror of the OS setting: this runs
+ * as a wall-mounted control-room display, where a light UI is glare in a dim
+ * room. A stored choice still wins, so the toggle keeps working.
+ */
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return "dark";
 }
 
 export function useTheme(): { theme: Theme; toggleTheme: () => void } {

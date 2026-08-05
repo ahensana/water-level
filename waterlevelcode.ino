@@ -1,435 +1,255 @@
+/*
+ * ESP8266 — A01NYUB ultrasonic + BMP280 + A7670C (4G LTE) -> Firebase
+ * ---------------------------------------------------------------
+ *   - A7670C modem   -> hardware UART0 @ 115200  (no IPR change needed)
+ *   - A01NYUB sensor -> SoftwareSerial on D5 @ 9600
+ *   - BMP280         -> I2C on D2 (SDA) / D1 (SCL)
+ *   - Debug logs     -> hardware UART1 (D4, TX-only) @ 115200
+ *
+ * Requires the "Adafruit BMP280 Library" (Library Manager) — it pulls in
+ * Adafruit Unified Sensor and Adafruit BusIO as dependencies.
+ *
+ * The modem gets the hardware UART because SoftwareSerial is unreliable at
+ * 115200 (8.7us/bit — any interrupt corrupts the byte). The sensor runs at
+ * 9600 (104us/bit), which SoftwareSerial handles comfortably.
+ *
+ * Only one SoftwareSerial port here, so no listen() juggling: the sensor is
+ * always receiving, even while we talk to the modem.
+ *
+ * ---- WIRING ---- (all 3.3V logic — no level shifting needed)
+ * A7670C modem:                      A01NYUB sensor:
+ *   TXD  -> D9  (GPIO3, RX0)           Red (VCC)   -> 5V
+ *   RXD  <- D10 (GPIO1, TX0)           Black (GND) -> GND
+ *   VBAT -> 3.8-4.0V battery           Yellow (TX) -> D5 (GPIO14)
+ *           (+1000uF cap)              White (RX)  -> unconnected
+ *   GND  -> GND (common)
+ *
+ * BMP280 (I2C):
+ *   VCC -> 3.3V   (NOT 5V — most breakouts are 3.3V only)
+ *   GND -> GND
+ *   SDA -> D2 (GPIO4)
+ *   SCL -> D1 (GPIO5)
+ *   SDO -> GND for address 0x76, or 3.3V for 0x77 (code tries both)
+ *
+ * Debug: D4 (GPIO2) -> USB-TTL adapter RX, monitor @ 115200.
+ *
+ * >>> BEFORE UPLOADING A SKETCH <<<
+ *   Disconnect the modem's TXD from D9. It drives the same pin the USB
+ *   bootloader uses and will corrupt the flash. Reconnect after uploading.
+ *
+ * ALL grounds common: sensor, modem, battery, ESP8266, USB-TTL adapter.
+ */
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include <Adafruit_BMP280.h>
 
-// --- Pins ---
-#define SIM_RX D7 // ESP8266 RX <- SIM800L TX
-#define SIM_TX D8 // ESP8266 TX -> SIM800L RX
-#define TRIG_PIN D5
-#define ECHO_PIN D6
+SoftwareSerial sensor(D5, D6);   // A01NYUB: RX=D5 (sensor TX), TX=D6 unused
+Adafruit_BMP280 bmp;             // BMP280 on I2C (D2=SDA, D1=SCL)
 
-// One-wire link FROM the Node B LoRa-receiver Nano.
-// Only NANO_RX is actually wired (Nano TX -> ESP RX). This link is one-way.
-// IMPORTANT: Nano TX is 5V, ESP8266 is 3.3V -> use a level shifter or a
-//            1k/2k voltage divider on this line, or you will damage the ESP.
-#define NANO_RX D3 // ESP8266 RX <- Nano TX (through level shifter/divider!)
-#define NANO_TX D4 // not connected (dummy TX; link is one-way)
+#define gsmSerial Serial         // A7670C on hardware UART0
+#define debug     Serial1        // debug logs on UART1 (D4, TX-only)
 
-SoftwareSerial sim800(SIM_RX, SIM_TX);
-SoftwareSerial nanoSerial(NANO_RX, NANO_TX);
-Adafruit_BMP280 bmp;
-
-float remotePressure = -1; // pressure received from Node A (via LoRa -> Nano)
-
-// --- Config ---
-// --- APN settings ---
-// Airtel IoT/M2M SIMs use a dedicated APN. Confirm the exact one printed on your
-// SIM paperwork / Airtel IoT portal. Common values:
-//   "airtelgprs.com"  -> standard Airtel consumer data
-//   "iot.airtel.com"  -> many Airtel IoT plans
-//   custom.airtel.com -> some enterprise/custom M2M plans
-const char APN[] = "airteliot.com"; // Airtel IoT/M2M private APN (per Airtel KYC email)
-const char APN_USER[] = "";         // leave "" unless Airtel gave you a username
-const char APN_PWD[] = "";          // leave "" unless Airtel gave you a password
+// ---- Firebase / APN config ----
+const char APN[]          = "airteliot.com";
 const char FIREBASE_URL[] = "https://water-level-ae453-default-rtdb.asia-southeast1.firebasedatabase.app/water_monitor/current.json";
 
-bool bmpOK = false;
+int   lastDistance = -1;                       // latest valid distance (mm)
+bool  bmpReady     = false;                    // false if the BMP280 wasn't found
+unsigned long lastUpload = 0;
+const unsigned long UPLOAD_INTERVAL = 30000;   // upload every 30 s
 
-// Send an AT command, print the modem's reply, and report whether
-// the expected keyword was seen within the timeout window.
-bool sendAT(const String &cmd, const char *expected, uint32_t timeout)
-{
-    while (sim800.available())
-        sim800.read(); // flush stale bytes
+// Standard sea-level pressure, used only for the absolute "altitude ASL"
+// figure. Height-above-baseline does not depend on it.
+const float SEALEVEL_PRESSURE_HPA = 1013.25;
 
-    Serial.print(">> ");
-    Serial.println(cmd);
-    sim800.println(cmd);
+// ---- BMP280 baseline (captured once in setup) ----
+// Height is derived by comparing each reading against the pressure recorded
+// at startup, so "0 m" always means "wherever the sensor was when it booted".
+float baselinePressure = NAN;   // hPa at power-on
+float baselineAltitude = NAN;   // m above sea level at power-on
 
-    String response = "";
-    uint32_t start = millis();
-    while (millis() - start < timeout)
-    {
-        while (sim800.available())
-        {
-            response += (char)sim800.read();
+void setup() {
+  gsmSerial.begin(115200);   // modem — hardware UART0
+  debug.begin(115200);       // debug  — hardware UART1 (TX-only)
+  sensor.begin(9600);        // A01NYUB
+  delay(5000);               // let the modem finish booting
+
+  debug.println(F("\n===== ESP8266: Sensor + BMP280 + A7670C + Firebase ====="));
+
+  setupBMP280();
+  testModem();
+  setupData();               // bring up LTE data connection once
+  debug.println(F("--- Setup done ---"));
+}
+
+void loop() {
+  readSensor();              // drain sensor frames -> lastDistance
+
+  if (millis() - lastUpload >= UPLOAD_INTERVAL) {
+    lastUpload = millis();
+
+    float pressure    = NAN;   // hPa
+    float temperature = NAN;   // degC
+    float height      = NAN;   // m relative to startup position
+    if (bmpReady) {
+      pressure    = bmp.readPressure() / 100.0F;   // Pa -> hPa
+      temperature = bmp.readTemperature();
+      height      = heightFromBaseline(pressure);
+    }
+
+    debug.print(F("Latest distance: "));
+    debug.print(lastDistance);
+    debug.print(F(" mm | pressure: "));
+    if (bmpReady) {
+      debug.print(pressure, 2);
+      debug.print(F(" hPa | temp: "));
+      debug.print(temperature, 2);
+      debug.print(F(" C | height vs baseline: "));
+      debug.print(height, 2);
+      debug.println(F(" m"));
+    } else {
+      debug.println(F("n/a"));
+    }
+
+    if (lastDistance >= 0) {
+      uploadToFirebase(lastDistance, pressure, temperature, height);
+    } else {
+      debug.println(F("No valid sensor reading yet - skipping upload."));
+    }
+  }
+}
+
+// Bring up the BMP280. Breakouts ship at either 0x76 or 0x77 depending on
+// how SDO is strapped, so try both before giving up.
+void setupBMP280() {
+  Wire.begin(D2, D1);            // SDA, SCL
+
+  if (bmp.begin(0x76) || bmp.begin(0x77)) {
+    bmpReady = true;
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
+                    Adafruit_BMP280::SAMPLING_X2,    // temperature
+                    Adafruit_BMP280::SAMPLING_X16,   // pressure
+                    Adafruit_BMP280::FILTER_X16,
+                    Adafruit_BMP280::STANDBY_MS_500);
+    debug.println(F("BMP280 found."));
+    calibrateBaseline();
+  } else {
+    debug.println(F("BMP280 NOT found - check wiring/address."));
+  }
+}
+
+// Capture the startup pressure as the zero point for height measurements.
+// A single sample is noisy (+/- a few Pa), and this value anchors every
+// reading for the whole run, so average a batch of them.
+void calibrateBaseline() {
+  const int SAMPLES = 20;
+
+  bmp.readPressure();            // discard the first conversion after config
+  delay(100);
+
+  float sum = 0;
+  for (int i = 0; i < SAMPLES; i++) {
+    sum += bmp.readPressure();   // Pa
+    delay(50);
+    yield();
+  }
+
+  baselinePressure = (sum / SAMPLES) / 100.0F;                    // hPa
+  baselineAltitude = bmp.readAltitude(SEALEVEL_PRESSURE_HPA);     // m ASL
+
+  debug.print(F("Baseline pressure: "));
+  debug.print(baselinePressure, 2);
+  debug.println(F(" hPa"));
+  debug.print(F("Baseline altitude: "));
+  debug.print(baselineAltitude, 2);
+  debug.println(F(" m above sea level"));
+}
+
+// Height of the current reading relative to the startup position, in metres.
+// Positive = higher than at boot. Uses the barometric formula rather than a
+// fixed hPa-per-metre constant so it stays accurate over larger differences.
+float heightFromBaseline(float pressureHPa) {
+  if (isnan(baselinePressure) || isnan(pressureHPa)) return NAN;
+  return 44330.0F * (1.0F - pow(pressureHPa / baselinePressure, 0.1903F));
+}
+
+void testModem() {
+  sendAT("AT");
+  sendAT("ATE0");
+  sendAT("AT+CPIN?");
+  sendAT("AT+CSQ");
+  sendAT("AT+COPS?");
+}
+
+// Bring up the A7670C LTE data connection (run once in setup).
+void setupData() {
+  sendAT("AT+CGDCONT=1,\"IP\",\"" + String(APN) + "\"");
+  sendAT("AT+CGATT=1", 10000);
+  sendAT("AT+CGACT=1,1", 10000);
+  sendAT("AT+CSOCKSETPN=1");       // point the socket layer at PDP context 1
+  sendAT("AT+NETOPEN", 15000);     // "already opened" is fine
+  sendAT("AT+IPADDR", 3000);
+}
+
+void sendAT(String cmd) { sendAT(cmd, 2000); }
+
+void sendAT(String cmd, unsigned long wait) {
+  debug.print(F(">> "));
+  debug.println(cmd);
+  gsmSerial.println(cmd);
+
+  unsigned long start = millis();
+  while (millis() - start < wait) {
+    while (gsmSerial.available()) debug.write(gsmSerial.read());  // echo reply
+    yield();                       // keep the ESP8266 watchdog happy
+  }
+  debug.println();
+}
+
+// Read A01NYUB frames and store the latest distance.
+// Frame: 0xFF DATA_H DATA_L CHECKSUM  ->  distance_mm = (H<<8)|L
+void readSensor() {
+  // The sensor free-runs at ~10 Hz, so the buffer holds stale frames from
+  // however long the last modem call took. Drop the backlog, keep the newest.
+  while (sensor.available() > 4) sensor.read();
+
+  unsigned long start = millis();
+  while (millis() - start < 100) { // short window to catch a fresh frame
+    while (sensor.available() >= 4) {
+      if (sensor.read() == 0xFF) {
+        byte high     = sensor.read();
+        byte low      = sensor.read();
+        byte checksum = sensor.read();
+        if (((0xFF + high + low) & 0xFF) == checksum) {
+          lastDistance = (high << 8) | low;
         }
-        if (expected != nullptr && response.indexOf(expected) != -1)
-        {
-            break;
-        }
+      }
     }
-
-    response.trim();
-    if (response.length())
-    {
-        Serial.println(response);
-    }
-
-    if (expected == nullptr)
-        return true;
-    return response.indexOf(expected) != -1;
+    yield();
+  }
 }
 
-// Query signal quality (AT+CSQ) and return RSSI in dBm.
-// Returns 0 if unknown / no signal.
-int getSignalStrength()
-{
-    while (sim800.available())
-        sim800.read();
-    sim800.println("AT+CSQ");
+// POST the readings to Firebase over the A7670C HTTP(S) engine.
+// pressureHPa/temperatureC are NAN when the BMP280 is missing - those fields
+// are then left out of the JSON rather than sent as null.
+void uploadToFirebase(int distanceMM, float pressureHPa, float temperatureC,
+                      float heightM) {
+  String json = "{\"distance\":" + String(distanceMM);
+  if (!isnan(pressureHPa))    json += ",\"pressure\":"    + String(pressureHPa, 2);
+  if (!isnan(temperatureC))   json += ",\"temperature\":" + String(temperatureC, 2);
+  if (!isnan(heightM))        json += ",\"height\":"      + String(heightM, 2);
+  json += ",\"timestamp\":{\".sv\":\"timestamp\"}}";
 
-    String response = "";
-    uint32_t start = millis();
-    while (millis() - start < 2000)
-    {
-        while (sim800.available())
-            response += (char)sim800.read();
-        if (response.indexOf("OK") != -1)
-            break;
-    }
+  debug.println(F("--- Uploading to Firebase ---"));
+  sendAT("AT+HTTPTERM", 1000);
+  sendAT("AT+HTTPINIT", 3000);
+  sendAT("AT+HTTPPARA=\"URL\",\"" + String(FIREBASE_URL) + "\"", 3000);
+  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 2000);
 
-    int idx = response.indexOf("+CSQ:");
-    if (idx == -1)
-    {
-        Serial.println("Signal: no response from modem");
-        return 0;
-    }
+  sendAT("AT+HTTPDATA=" + String(json.length()) + ",10000", 2000);
+  gsmSerial.print(json);
+  delay(1000);
 
-    int comma = response.indexOf(',', idx);
-    int rssiRaw = response.substring(idx + 6, comma).toInt();
-
-    if (rssiRaw == 99)
-    {
-        Serial.println("Signal: not detectable (99)");
-        return 0;
-    }
-
-    int dbm = -113 + (rssiRaw * 2); // per SIM800 datasheet mapping
-    Serial.print("Signal: ");
-    Serial.print(rssiRaw);
-    Serial.print(" (");
-    Serial.print(dbm);
-    Serial.print(" dBm) - ");
-    if (rssiRaw >= 20)
-        Serial.println("Excellent");
-    else if (rssiRaw >= 15)
-        Serial.println("Good");
-    else if (rssiRaw >= 10)
-        Serial.println("OK");
-    else
-        Serial.println("Weak");
-
-    return dbm;
-}
-
-// Wait until the module has registered on the network (CREG 0,1 or 0,5).
-bool waitForNetwork(uint32_t timeout)
-{
-    Serial.println("Searching for network...");
-    uint32_t start = millis();
-
-    while (millis() - start < timeout)
-    {
-        while (sim800.available())
-            sim800.read();
-        sim800.println("AT+CREG?");
-
-        String response = "";
-        uint32_t t = millis();
-        while (millis() - t < 2000)
-        {
-            while (sim800.available())
-                response += (char)sim800.read();
-            if (response.indexOf("OK") != -1)
-                break;
-        }
-
-        if (response.indexOf("+CREG: 0,1") != -1 ||
-            response.indexOf("+CREG: 0,5") != -1)
-        {
-            Serial.println("Network registered.");
-            getSignalStrength();
-            return true;
-        }
-
-        Serial.println("...still searching");
-        getSignalStrength();
-        delay(2000);
-    }
-
-    Serial.println("Network registration TIMED OUT.");
-    return false;
-}
-
-void setupGPRS()
-{
-    Serial.println("Configuring GPRS...");
-    sendAT("AT+SAPBR=0,1", nullptr, 2000); // Close bearer if open
-    sendAT("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 2000);
-    sendAT("AT+SAPBR=3,1,\"APN\",\"" + String(APN) + "\"", "OK", 2000);
-    if (strlen(APN_USER) > 0)
-    {
-        sendAT("AT+SAPBR=3,1,\"USER\",\"" + String(APN_USER) + "\"", "OK", 2000);
-    }
-    if (strlen(APN_PWD) > 0)
-    {
-        sendAT("AT+SAPBR=3,1,\"PWD\",\"" + String(APN_PWD) + "\"", "OK", 2000);
-    }
-    sendAT("AT+SAPBR=1,1", "OK", 8000); // Open bearer
-    sendAT("AT+SAPBR=2,1", "OK", 3000); // Query assigned IP
-}
-
-bool isGPRSConnected()
-{
-    while (sim800.available())
-        sim800.read();
-    sim800.println("AT+SAPBR=2,1");
-
-    String response = "";
-    uint32_t start = millis();
-    while (millis() - start < 2000)
-    {
-        while (sim800.available())
-            response += (char)sim800.read();
-        if (response.indexOf("OK") != -1)
-            break;
-    }
-
-    // If it contains "0.0.0.0" (or no IP at all), we are not connected
-    if (response.indexOf("0.0.0.0") != -1)
-        return false;
-    if (response.indexOf("+SAPBR:") == -1)
-        return false;
-    return true;
-}
-
-float readDistanceCM()
-{
-    digitalWrite(TRIG_PIN, LOW);
-    delayMicroseconds(2);
-    digitalWrite(TRIG_PIN, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(TRIG_PIN, LOW);
-    long duration = pulseIn(ECHO_PIN, HIGH, 30000);
-    return (duration == 0) ? -1 : duration * 0.0343 / 2.0;
-}
-
-void printSensorReadings()
-{
-    Serial.println("--- Sensor Readings ---");
-
-    if (bmpOK)
-    {
-        Serial.print("BMP280 Temp     : ");
-        Serial.print(bmp.readTemperature(), 2);
-        Serial.println(" C");
-
-        Serial.print("BMP280 Pressure : ");
-        Serial.print(bmp.readPressure() / 100.0, 2);
-        Serial.println(" hPa");
-    }
-    else
-    {
-        Serial.println("BMP280          : NOT DETECTED");
-    }
-
-    float distance = readDistanceCM();
-    Serial.print("Ultrasonic Dist : ");
-    if (distance < 0)
-        Serial.println("out of range / no echo");
-    else
-    {
-        Serial.print(distance, 1);
-        Serial.println(" cm");
-    }
-    Serial.println("-----------------------");
-}
-
-// Listen briefly to the Node B Nano and grab the latest pressure value.
-// The Nano sends lines like:  P:1013.25\n
-// Returns the parsed pressure, or the previous value if nothing arrived.
-float readNanoPressure(uint32_t windowMs)
-{
-    nanoSerial.listen(); // switch the active SoftwareSerial to the Nano
-    String line = "";
-    float latest = remotePressure; // keep last known if no new data
-    uint32_t start = millis();
-
-    while (millis() - start < windowMs)
-    {
-        while (nanoSerial.available())
-        {
-            char c = (char)nanoSerial.read();
-            if (c == '\n' || c == '\r')
-            {
-                line.trim();
-                int idx = line.indexOf("P:");
-                if (idx != -1)
-                {
-                    latest = line.substring(idx + 2).toFloat();
-                }
-                line = "";
-            }
-            else
-            {
-                line += c;
-            }
-        }
-    }
-
-    sim800.listen(); // hand the radio back to the SIM800L
-    return latest;
-}
-
-void setup()
-{
-    Serial.begin(115200);
-    sim800.begin(9600);
-    nanoSerial.begin(9600);
-    sim800.listen(); // SIM is the default active listener
-    Wire.begin(D2, D1);
-
-    pinMode(TRIG_PIN, OUTPUT);
-    pinMode(ECHO_PIN, INPUT);
-
-    Serial.println("\n--- System Initializing ---");
-
-    // 1. Sensors
-    bmpOK = bmp.begin(0x76) || bmp.begin(0x77);
-    if (!bmpOK)
-    {
-        Serial.println("BMP280 sensor not detected!");
-    }
-    printSensorReadings();
-
-    // 2. Wait for the SIM800L to respond to AT before doing anything else
-    Serial.println("Waiting for SIM800L...");
-    bool modemReady = false;
-    for (int i = 0; i < 10 && !modemReady; i++)
-    {
-        modemReady = sendAT("AT", "OK", 1000);
-        if (!modemReady)
-            delay(1000);
-    }
-    if (!modemReady)
-    {
-        Serial.println("SIM800L not responding! Check power (needs strong 4V/2A) & wiring.");
-    }
-
-    sendAT("ATE0", "OK", 1000);     // turn off command echo for cleaner logs
-    sendAT("AT+CPIN?", "OK", 2000); // SIM status
-    sendAT("AT+COPS?", "OK", 3000); // current operator
-
-    // 3. Signal + network registration
-    getSignalStrength();
-    waitForNetwork(60000);
-
-    // 4. GPRS
-    setupGPRS();
-
-    Serial.println("--- Init complete ---\n");
-}
-
-void loop()
-{
-    // 1. Show live sensor + signal status each cycle
-    printSensorReadings();
-    getSignalStrength();
-
-    // 2. Connectivity Check
-    if (!isGPRSConnected())
-    {
-        Serial.println("GPRS not connected, reconnecting...");
-        waitForNetwork(60000);
-        setupGPRS();
-    }
-
-    // 3. Read local sensors for payload
-    float pressure = bmpOK ? (bmp.readPressure() / 100.0) : -1;
-    float distance = readDistanceCM();
-
-    // 3b. Grab the latest remote pressure from Node A (via the Node B Nano)
-    remotePressure = readNanoPressure(2000);
-    Serial.print("Remote pressure (Node A): ");
-    Serial.println(remotePressure);
-
-    // 4. Prepare JSON
-    String payload = "{\"pressure\":" + String(pressure) +
-                     ",\"distance\":" + String(distance) +
-                     ",\"remote_pressure\":" + String(remotePressure) +
-                     ",\"timestamp\":{\".sv\":\"timestamp\"}}";
-
-    Serial.println("Sending to Firebase...");
-    sendToFirebase(payload);
-
-    delay(30000); // 30-second interval
-}
-
-void sendToFirebase(String data)
-{
-    sendAT("AT+HTTPTERM", nullptr, 1000); // make sure no stale session is open
-    sendAT("AT+HTTPINIT", "OK", 2000);
-    sendAT("AT+HTTPSSL=1", "OK", 2000); // REQUIRED: Firebase is HTTPS
-    sendAT("AT+HTTPPARA=\"CID\",1", "OK", 2000);
-    sendAT("AT+HTTPPARA=\"URL\",\"" + String(FIREBASE_URL) + "\"", "OK", 2000);
-    sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", "OK", 2000);
-
-    sendAT("AT+HTTPDATA=" + String(data.length()) + ",10000", "DOWNLOAD", 3000);
-    sim800.println(data);
-    delay(1000);
-
-    // PUT overwrites current.json (0=GET, 1=POST, 2=HEAD... use POST to append,
-    // change to 2 for PUT if your firmware supports it). Keeping POST here.
-    while (sim800.available())
-        sim800.read();
-    Serial.println(">> AT+HTTPACTION=1");
-    sim800.println("AT+HTTPACTION=1");
-
-    // Wait for the COMPLETE +HTTPACTION line (HTTPS over 2G can be slow).
-    String response = "";
-    uint32_t start = millis();
-    int httpStatus = -1;
-    while (millis() - start < 60000)
-    {
-        while (sim800.available())
-            response += (char)sim800.read();
-
-        int idx = response.indexOf("+HTTPACTION:");
-        if (idx != -1)
-        {
-            // Line format: +HTTPACTION: <method>,<status>,<datalen>
-            int nl = response.indexOf('\n', idx);
-            if (nl != -1)
-            { // full line has arrived
-                int firstComma = response.indexOf(',', idx);
-                int secondComma = response.indexOf(',', firstComma + 1);
-                if (firstComma != -1 && secondComma != -1)
-                {
-                    httpStatus = response.substring(firstComma + 1, secondComma).toInt();
-                }
-                break;
-            }
-        }
-    }
-
-    response.trim();
-    if (response.length())
-        Serial.println(response);
-
-    Serial.print("HTTP status: ");
-    Serial.println(httpStatus);
-
-    if (httpStatus == 200 || httpStatus == 204)
-    {
-        Serial.println(">> Success: Data sent to Firebase!");
-    }
-    else
-    {
-        Serial.print(">> Error: send failed (status ");
-        Serial.print(httpStatus);
-        Serial.println("). See SIM800L HTTP status codes.");
-    }
-
-    sendAT("AT+HTTPTERM", "OK", 2000);
+  sendAT("AT+HTTPACTION=1", 10000);   // POST
+  sendAT("AT+HTTPTERM", 2000);
 }

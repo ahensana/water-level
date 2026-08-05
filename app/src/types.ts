@@ -1,14 +1,21 @@
 /** Raw shape of a reading under `water_monitor/current` in Firebase Realtime Database. */
 export interface RawWaterMonitorReading {
   /**
-   * Distance from sensor to water surface, in CENTIMETRES. This is the field the
-   * current firmware writes (ultrasonic reading). Preferred over the legacy
-   * metre-based fields below.
+   * Distance from sensor to water surface, in MILLIMETRES. This is the field the
+   * current firmware writes (A01NYUB ultrasonic reading). Preferred over the
+   * legacy metre-based fields below.
    */
   distance?: number;
-  /** Local BMP280 barometric pressure (hPa) at the gateway node. Current firmware. */
+  /** Local BMP280 barometric pressure (hPa). Omitted entirely if no BMP280 was detected. */
   pressure?: number;
-  /** Remote pressure (hPa) relayed from Node A over LoRa. May be absent / -1 if no remote data. */
+  /** BMP280 air temperature (degC). Omitted entirely if no BMP280 was detected. */
+  temperature?: number;
+  /**
+   * Barometric height (m) relative to wherever the device was when it booted,
+   * not an absolute altitude. Omitted entirely if no BMP280 was detected.
+   */
+  height?: number;
+  /** Legacy: remote pressure (hPa) relayed from Node A over LoRa. No longer sent by the firmware. */
   remote_pressure?: number;
   /** Legacy: distance from sensor to water surface (m). */
   distance_m?: number;
@@ -55,9 +62,13 @@ export interface DerivedReading {
   batteryVoltage: number | null;
   /** GSM signal strength (raw CSQ 0–31), or null if not reported in this reading. */
   signalStrength: number | null;
-  /** Local barometric pressure (hPa) at the gateway node, or null if not reported. */
+  /** Barometric pressure (hPa) from the on-device BMP280, or null if not reported. */
   pressureHpa: number | null;
-  /** Remote pressure (hPa) relayed from Node A over LoRa, or null if not reported. */
+  /** Air temperature (degC) from the BMP280, or null if not reported. */
+  temperatureC: number | null;
+  /** Barometric height (m) relative to the device's boot position, or null if not reported. */
+  heightM: number | null;
+  /** Legacy: remote LoRa pressure (hPa). Always null with the current firmware. */
   remotePressureHpa: number | null;
 }
 
