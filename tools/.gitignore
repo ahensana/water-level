@@ -1,0 +1,3 @@
+# Raw RTDB pull used for calibration analysis - regenerate, don't commit.
+sensor-dump.json
+accuracy-report.json

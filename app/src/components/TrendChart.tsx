@@ -3,6 +3,7 @@ import {
   Area,
   AreaChart,
   Brush,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,6 +14,12 @@ import {
 } from "recharts";
 import type { SessionHistoryPoint } from "../types";
 import { SITE_CONFIG } from "../config";
+import { useNow } from "../hooks/useNow";
+import { computePeriodStats } from "../lib/analytics";
+// Kept static rather than lazy: it is well under a kilobyte, and the report
+// panel imports it statically anyway, so a dynamic import here splits nothing.
+import { downloadCsv, historyToCsv } from "../lib/csvExport";
+import { effectiveSensorElevationFt } from "../lib/waterLevel";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { ChartSkeleton } from "./Skeletons";
 
@@ -317,6 +324,7 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
   const [range, setRange] = useState<RangeKey>("1h");
   const containerRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
+  const now = useNow();
 
   const windowMs = RANGE_OPTIONS.find((r) => r.key === range)!.windowMs;
 
@@ -331,13 +339,16 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
   }, [windowMs]);
 
   const data = useMemo(() => {
-    const cutoff = Date.now() - windowMs;
+    const cutoff = now - windowMs;
     return history.filter((p) => p.t >= cutoff).map((p) => ({ ...p, label: formatTime(p.t) }));
-  }, [history, windowMs, formatTime]);
+  }, [history, windowMs, formatTime, now]);
+
+  const periodStats = useMemo(() => computePeriodStats(history, windowMs, now), [history, windowMs, now]);
 
   // Build an explicit, evenly-spaced Y-axis in feet (field staff-gauge unit),
   // zoomed to the observed band so small level changes remain visible.
-  const sensorElevationFt = SITE_CONFIG.sensorElevationFt;
+  // Trim-adjusted, so the plotted mount line stays consistent with the levels.
+  const sensorElevationFt = effectiveSensorElevationFt();
   const { yMin, yMax, yTicks } = useMemo(
     () => buildYAxisFt(
       data.map((p) => p.waterLevelFt),
@@ -371,15 +382,19 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
     }
   };
 
+  const handleExportCsv = () => {
+    downloadCsv(`water-level-readings-${range}-${Date.now()}`, historyToCsv(data));
+  };
+
   if (loadState === "loading") {
     return <ChartSkeleton />;
   }
 
   return (
     <Card>
-      <CardHeader className="flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+      <CardHeader className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
         <CardTitle>Water Level Trend</CardTitle>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <div className="flex rounded-lg border border-neutral-200 p-0.5 dark:border-neutral-700">
             {RANGE_OPTIONS.map((opt) => (
               <button
@@ -396,7 +411,7 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
               </button>
             ))}
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 print:hidden">
             <button
               type="button"
               disabled={exporting || data.length === 0}
@@ -413,13 +428,34 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
             >
               Export PDF
             </button>
+            <button
+              type="button"
+              disabled={data.length === 0}
+              onClick={handleExportCsv}
+              title="Download trusted readings in this range as CSV, for departmental records"
+              className="rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            >
+              Export CSV
+            </button>
           </div>
         </div>
       </CardHeader>
       <CardBody>
+        {periodStats.count > 0 && (
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <PeriodStat label="Min" value={`${periodStats.minFt!.toFixed(2)} ft`} />
+            <PeriodStat label="Max" value={`${periodStats.maxFt!.toFixed(2)} ft`} />
+            <PeriodStat label="Mean" value={`${periodStats.meanFt!.toFixed(2)} ft`} />
+            <PeriodStat
+              label="Net Change"
+              value={`${periodStats.netChangeFt! >= 0 ? "+" : ""}${periodStats.netChangeFt!.toFixed(2)} ft`}
+              tone={periodStats.netChangeFt! > 0 ? "rising" : periodStats.netChangeFt! < 0 ? "falling" : undefined}
+            />
+          </div>
+        )}
         <div ref={containerRef} className="bg-white dark:bg-neutral-900">
           {data.length < 2 ? (
-            <div className="flex h-105 flex-col items-center justify-center gap-2 text-center">
+            <div className="flex h-80 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
                 {history.length === 0 ? "No readings yet" : "Not enough data in this range"}
               </p>
@@ -430,7 +466,7 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
               </p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={420}>
+            <ResponsiveContainer width="100%" height={340}>
               <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 4 }}>
                 {/* No CartesianGrid: its horizontal lines sit inside the water
                     body whenever headroom is thin, cutting across the wave. */}
@@ -460,6 +496,28 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
                   width={yAxisWidth}
                 />
                 <WaterColumn points={data} sensorElevationFt={sensorElevationFt} yMin={yMin} />
+                {/* Only drawn when the threshold actually falls inside the
+                    current zoom — usually off-screen during normal safe-zone
+                    operation, and that's correct: they matter when the level
+                    approaches them, not as permanent chart furniture. */}
+                {SITE_CONFIG.warningLevelFt >= yMin && SITE_CONFIG.warningLevelFt <= yMax && (
+                  <ReferenceLine
+                    y={SITE_CONFIG.warningLevelFt}
+                    stroke="#f59e0b"
+                    strokeDasharray="4 3"
+                    strokeWidth={1.5}
+                    label={{ value: "Warning", position: "insideTopLeft", fill: "#f59e0b", fontSize: 11 }}
+                  />
+                )}
+                {SITE_CONFIG.criticalLevelFt >= yMin && SITE_CONFIG.criticalLevelFt <= yMax && (
+                  <ReferenceLine
+                    y={SITE_CONFIG.criticalLevelFt}
+                    stroke="#ef4444"
+                    strokeDasharray="4 3"
+                    strokeWidth={1.5}
+                    label={{ value: "Critical", position: "insideTopLeft", fill: "#ef4444", fontSize: 11 }}
+                  />
+                )}
                 {/* cursor=false: Recharts' default hover cursor is a straight
                     vertical line, which cuts across the wave. The activeDot
                     on the invisible Area below is enough of a hover cue. */}
@@ -489,5 +547,28 @@ export function TrendChart({ history, loadState }: TrendChartProps) {
         </div>
       </CardBody>
     </Card>
+  );
+}
+
+function PeriodStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "rising" | "falling";
+}) {
+  const toneClass =
+    tone === "rising"
+      ? "text-warning-600 dark:text-warning-500"
+      : tone === "falling"
+        ? "text-primary-600 dark:text-primary-400"
+        : "text-neutral-900 dark:text-white";
+  return (
+    <div className="rounded-lg border border-neutral-200 px-3 py-1.5 dark:border-neutral-700">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{label}</p>
+      <p className={`text-sm font-bold tabular-nums ${toneClass}`}>{value}</p>
+    </div>
   );
 }

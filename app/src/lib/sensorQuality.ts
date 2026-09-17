@@ -12,6 +12,7 @@ import {
   classifyAlertLevel,
   clamp,
   distanceToWaterLevelFt,
+  replayAlertLevels,
   resolveDeviceTimeMs,
   resolveDistanceMm,
   formatDeviceReportedAt,
@@ -53,20 +54,28 @@ export function processMonitorPipeline(
   rawHistory: RawWaterMonitorReading[],
   liveRaw: RawWaterMonitorReading | null,
   liveReceivedAtMs: number,
-  previousAlert: AlertLevel | null,
 ): PipelineResult {
+  const now = Date.now();
+  // Reject-rate, gap detection and displayed fault codes only look at this
+  // recent slice — old, already-resolved problems (e.g. bench-test noise
+  // from before the sensor was mounted) stay in the loaded history for the
+  // trend chart/live median, but must not keep flagging current status.
+  const qualityWindowStart = now - SITE_CONFIG.qualityWindowMs;
+
   const timed: TimedRaw[] = [];
   for (const raw of rawHistory) {
     const deviceT = resolveDeviceTimeMs(raw);
     const t = deviceT ?? null;
     if (t == null || !Number.isFinite(t) || t <= 0) continue;
+    // Pre-commissioning readings are a different datum, not recoverable noise.
+    if (t < SITE_CONFIG.dataStartMs) continue;
     timed.push({ raw, t });
   }
   if (liveRaw) {
     const deviceT = resolveDeviceTimeMs(liveRaw);
     const t = deviceT ?? liveReceivedAtMs;
     // Prefer including live even if already in history (dedupe by time+distance later).
-    timed.push({ raw: liveRaw, t });
+    if (t >= SITE_CONFIG.dataStartMs) timed.push({ raw: liveRaw, t });
   }
 
   timed.sort((a, b) => a.t - b.t);
@@ -84,34 +93,61 @@ export function processMonitorPipeline(
 
   const faultCodes = new Set<FaultCode>();
   let rejected = 0;
+  let recentTotal = 0;
 
   type Candidate = { t: number; distanceMm: number; raw: RawWaterMonitorReading };
   const physicalOk: Candidate[] = [];
 
   for (const row of deduped) {
+    const isRecent = row.t >= qualityWindowStart;
+    if (isRecent) recentTotal++;
     const distanceMm = resolveDistanceMm(row.raw);
     const fault = classifyDistanceFault(distanceMm);
     if (fault) {
-      rejected++;
-      faultCodes.add(fault);
+      if (isRecent) {
+        rejected++;
+        faultCodes.add(fault);
+      }
       continue;
     }
     physicalOk.push({ t: row.t, distanceMm, raw: row.raw });
   }
 
-  // Rate / jump filter against last accepted trusted point.
+  // Rate / jump filter against the last accepted trusted point, with a
+  // sustained-step escape hatch so a wrong baseline cannot latch forever.
   const trusted: Candidate[] = [];
+  let pendingStep: Candidate[] = [];
+
   for (const c of physicalOk) {
     const prev = trusted[trusted.length - 1];
-    if (prev) {
-      const jumpFault = classifyJumpFault(prev.distanceMm, c.distanceMm, c.t - prev.t);
-      if (jumpFault) {
-        rejected++;
-        faultCodes.add(jumpFault);
-        continue;
-      }
+    if (!prev) {
+      trusted.push(c);
+      continue;
     }
-    trusted.push(c);
+
+    const jumpFault = classifyJumpFault(prev.distanceMm, c.distanceMm, c.t - prev.t);
+    if (!jumpFault) {
+      // Back in agreement with the baseline, so whatever we were holding was a
+      // transient echo, not a step. Drop it.
+      pendingStep = [];
+      trusted.push(c);
+      continue;
+    }
+
+    // Hold rejected samples rather than discarding them outright: one outlier
+    // is a spike, but a long run that agrees with itself is a real step.
+    pendingStep.push(c);
+    if (isSustainedStep(pendingStep)) {
+      trusted.push(...pendingStep);
+      pendingStep = [];
+      faultCodes.add("resync");
+      continue;
+    }
+
+    if (c.t >= qualityWindowStart) {
+      rejected++;
+      faultCodes.add(jumpFault);
+    }
   }
 
   const smoothed = medianSmooth(trusted, SITE_CONFIG.medianWindow);
@@ -129,15 +165,32 @@ export function processMonitorPipeline(
       waterLevelM: waterLevelFt / METERS_TO_FEET,
       capacityPct: clamp((waterLevelFt / SITE_CONFIG.fullCapacityFt) * 100, 0, 100),
       trusted: true,
+      temperatureC: resolveFinite(c.raw.temperature),
+      pressureHpa: resolvePressure(c.raw.pressure),
+      batteryVoltage: resolveBattery(c.raw),
+      signalStrength: resolveSignal(c.raw),
     };
   });
 
-  const longestGapMs = longestGap(trusted.map((c) => c.t));
+  /**
+   * Alert level entering the live sample, obtained by replaying the whole
+   * trusted history through the hysteresis rule.
+   *
+   * Carrying this state across React renders instead made the answer depend on
+   * how long the tab had been open: a freshly loaded dashboard and one left
+   * running overnight could disagree about the current alert on identical data.
+   * Deriving it from the record makes the alert a pure function of the readings,
+   * so every operator sees the same band and a refresh changes nothing.
+   */
+  const replayed = replayAlertLevels(history.map((p) => p.waterLevelFt));
+  const priorAlert: AlertLevel | null = replayed.length ? replayed[replayed.length - 1] : null;
+
+  const recentTrusted = trusted.filter((c) => c.t >= qualityWindowStart);
+  const longestGapMs = longestGap(recentTrusted.map((c) => c.t));
   if (longestGapMs >= SITE_CONFIG.gapDetectMs) {
     faultCodes.add("data_gap");
   }
 
-  const now = Date.now();
   const liveWindowStart = now - SITE_CONFIG.liveSampleWindowMs;
   const liveSamples = trusted.filter((c) => c.t >= liveWindowStart);
   // If clock skew puts device time ahead/behind, fall back to last N trusted.
@@ -153,10 +206,20 @@ export function processMonitorPipeline(
       0,
       SITE_CONFIG.fullCapacityFt,
     );
-    const alertLevel = classifyAlertLevel(waterLevelFt, previousAlert);
     const ageMs = now - anchor.t;
     const isStale = ageMs > SITE_CONFIG.offlineTimeoutMs;
+    const isUnavailable = ageMs > SITE_CONFIG.readingFaultAfterMs;
     if (isStale) faultCodes.add("stale");
+    if (isUnavailable) faultCodes.add("no_trusted_data");
+
+    // An old reading must never manufacture an alarm. Once unavailable there is
+    // no level to classify at all; while merely stale, hold the last known
+    // classification instead of re-deriving one from data we no longer trust.
+    const alertLevel = isUnavailable
+      ? "normal"
+      : isStale
+        ? (priorAlert ?? "normal")
+        : classifyAlertLevel(waterLevelFt, priorAlert);
 
     reading = {
       distanceMm: medianMm,
@@ -165,7 +228,7 @@ export function processMonitorPipeline(
       waterLevelFt,
       capacityPct: clamp((waterLevelFt / SITE_CONFIG.fullCapacityFt) * 100, 0, 100),
       alertLevel,
-      isSensorFault: false,
+      isSensorFault: isUnavailable,
       isStale,
       isSmoothed: samplesForLive.length >= 3,
       faultCodes: [...faultCodes],
@@ -188,7 +251,7 @@ export function processMonitorPipeline(
       waterLevelM: 0,
       waterLevelFt: 0,
       capacityPct: 0,
-      alertLevel: previousAlert ?? "normal",
+      alertLevel: priorAlert ?? "normal",
       isSensorFault: true,
       isStale: true,
       isSmoothed: false,
@@ -204,7 +267,7 @@ export function processMonitorPipeline(
     };
   }
 
-  const total = deduped.length || 1;
+  const total = recentTotal || 1;
   const rejectRate = rejected / total;
   if (rejectRate > 0.25) faultCodes.add("high_reject_rate");
 
@@ -240,19 +303,43 @@ export function classifyJumpFault(
 ): FaultCode | null {
   if (dtMs <= 0) return null;
   const deltaFt = Math.abs(prevMm - nextMm) * (METERS_TO_FEET / 1000);
-  const hours = dtMs / 3_600_000;
 
-  // Absolute jump cap only for short intervals (false echoes within minutes).
-  // After a long outage, a larger step can be a real level change — use rate only.
+  // Short intervals (normal ~30s cadence): judge by absolute step size only.
+  // A ft/hour rate is meaningless at this timescale — the firmware's own
+  // ~5-10mm sample-to-sample echo dither, extrapolated to an hourly rate,
+  // blows straight past maxLevelChangeFtPerHour even though it is nowhere
+  // near a real fault. Only a step bigger than the short-window cap (false
+  // echo/dropout) is rejected here.
   const SHORT_WINDOW_MS = 10 * 60 * 1000;
-  if (dtMs < SHORT_WINDOW_MS && deltaFt > SITE_CONFIG.maxLevelJumpFt) {
-    return "spike";
+  if (dtMs < SHORT_WINDOW_MS) {
+    return deltaFt > SITE_CONFIG.maxLevelJumpFt ? "spike" : null;
   }
 
-  const rateHours = Math.max(hours, 1 / 60);
-  const rate = deltaFt / rateHours;
-  if (rate > SITE_CONFIG.maxLevelChangeFtPerHour) return "spike";
-  return null;
+  // Longer gap (e.g. after an outage): a bigger absolute step can be a real
+  // level change, so gate by sustained rate instead of an absolute cap.
+  const hours = dtMs / 3_600_000;
+  const rate = deltaFt / hours;
+  return rate > SITE_CONFIG.maxLevelChangeFtPerHour ? "spike" : null;
+}
+
+/**
+ * True when a run of rejected samples has held a consistent new value for
+ * longer than `resyncAfterMs` — i.e. the sensor really is reading somewhere
+ * new (remount, recalibration) rather than throwing a transient false echo.
+ *
+ * Deliberately conservative: see the `resyncAfterMs` note in SITE_CONFIG for
+ * why adopting a new baseline quickly is worse than staying blind.
+ */
+function isSustainedStep(pending: { t: number; distanceMm: number }[]): boolean {
+  if (pending.length < SITE_CONFIG.resyncMinSamples) return false;
+  if (pending[pending.length - 1].t - pending[0].t < SITE_CONFIG.resyncAfterMs) return false;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const p of pending) {
+    if (p.distanceMm < min) min = p.distanceMm;
+    if (p.distanceMm > max) max = p.distanceMm;
+  }
+  return max - min <= SITE_CONFIG.resyncSpreadMm;
 }
 
 function medianSmooth(
@@ -295,7 +382,13 @@ function resolveQuality(
 ): DataQuality {
   if (!reading || reading.isSensorFault || faults.has("no_trusted_data")) return "fault";
   if (reading.isStale || faults.has("stale")) return "degraded";
-  if (faults.has("data_gap") || faults.has("spike") || faults.has("high_reject_rate") || rejectRate > 0.1) {
+  if (
+    faults.has("data_gap") ||
+    faults.has("spike") ||
+    faults.has("resync") ||
+    faults.has("high_reject_rate") ||
+    rejectRate > 0.1
+  ) {
     return "degraded";
   }
   return "good";
@@ -310,10 +403,15 @@ function qualityMessage(
   if (quality === "good") return null;
   const parts: string[] = [];
   if (faults.has("no_trusted_data")) {
-    parts.push("No trusted sensor readings — check A01 aim, mounting, and power.");
+    parts.push(
+      "Level unavailable — no trusted reading for over an hour. Alerts are suppressed. " +
+        "Check A01 aim, mounting, and power.",
+    );
+  } else if (faults.has("stale")) {
+    parts.push("Last trusted reading is stale (device may be offline); alert level is held, not re-evaluated.");
   }
-  if (faults.has("stale")) {
-    parts.push("Last trusted reading is stale (device may be offline).");
+  if (faults.has("resync")) {
+    parts.push("Baseline re-synced after a sustained step — verify the sensor has not moved.");
   }
   if (faults.has("data_gap")) {
     const mins = Math.round(longestGapMs / 60_000);
@@ -361,4 +459,5 @@ export const FAULT_CODE_LABEL: Record<FaultCode, string> = {
   stale: "Stale reading",
   no_trusted_data: "No trusted data",
   high_reject_rate: "High reject rate",
+  resync: "Baseline re-synced",
 };

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "jetro": {
+      "type": "stdio",
+      "command": "C:\\Users\\DAME\\.jetro\\runtime\\node-win32-x64.exe",
+      "args": [
+        "C:\\Users\\DAME\\.jetro\\mcp-server\\index.js"
+      ],
+      "env": {
+        "JET_WORKSPACE": "d:\\MechatronPvtLtd\\Projects\\GodsEye\\INDRA\\water-level-main\\water-level-main",
+        "JET_API_URL": "https://api.jetro.ai",
+        "PATH": "C:\\Users\\DAME\\.jetro\\runtime;C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin;C:\\Program Files\\Common Files\\Oracle\\Java\\javapath;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\Program Files\\NVIDIA Corporation\\NVIDIA NvDLISR;C:\\Program Files\\dotnet\\;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;C:\\Flutter\\flutter_windows_3.27.1-stable\\flutter\\bin;C:\\Program Files\\PostgreSQL\\17\\bin;C:\\apache-maven-3.9.9\\bin;C:\\Users\\DAME\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\;C:\\poppler-24.08.0\\Library\\bin;C:\\Program Files\\Tesseract-OCR;C:\\chromedriver-win64\\chromedriver-win64;C:\\Users\\DAME\\AppData\\Local\\Android\\Sdk\\platform-tools;C:\\Users\\DAME\\AppData\\Local\\Pub\\Cache\\bin;C:\\Users\\DAME\\.amplify\\bin;C:\\Users\\DAME\\java\\java-1.8.0-openjdk-1.8.0.392-1.b08.redhat.windows.x86_64\\bin;C:\\Program Files\\Microsoft SQL Server\\150\\Tools\\Binn\\;C:\\ProgramData\\chocolatey\\bin;E:\\poppler-24.08.0\\Library\\bin;C:\\Users\\DAME\\AppData\\Local\\Android\\Sdk\\emulator;C:\\Users\\DAME\\AppData\\Local\\Android\\Sdk\\platform-tools;C:\\Program Files (x86)\\Google\\Cloud SDK\\google-cloud-sdk\\bin;C:\\Program Files\\GitHub CLI\\;C:\\Program Files\\gs\\gs10.06.0\\bin;C:\\Program Files\\gs\\gs10.06.0\\bin;C:\\ProgramData\\ComposerSetup\\bin;C:\\php;C:\\Program Files\\CMake\\bin;C:\\Program Files\\nodejs\\;C:\\Program Files\\Tailscale\\;C:\\Users\\DAME\\.local\\bin;C:\\Users\\DAME\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts;C:\\Users\\DAME\\AppData\\Local\\hermes\\bin;C:\\Users\\DAME\\.unsloth\\studio\\bin;C:\\Users\\DAME\\AppData\\Local\\Android\\Sdk\\tools;C:\\Users\\DAME\\AppData\\Local\\jdk-11.0.2\\bin;C:\\Users\\DAME\\AppData\\Local\\Programs\\Python\\Python313\\;C:\\Users\\DAME\\AppData\\Local\\Programs\\Python\\Launcher\\;C:\\Users\\DAME\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\DAME\\.dotnet\\tools;C:\\Users\\DAME\\AppData\\Local\\Programs\\Ollama;C;E:\\Flutter_Apps\\flutter\\bin;C:\\Users\\DAME\\AppData\\Local\\Programs\\Azure Dev CLI\\;C:\\Users\\DAME\\AppData\\Roaming\\Composer\\vendor\\bin;C:\\Users\\DAME\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\DAME\\AppData\\Local\\Pandoc\\;D:\\flutter\\bin;D:\\flutter;C:\\Users\\DAME\\AppData\\Local\\Microsoft\\WinGet\\Links;C:\\Users\\DAME\\AppData\\Roaming\\npm;D:\\cursor\\resources\\app\\bin;C:\\Users\\DAME\\.local\\bin"
+      }
+    }
+  }
+}

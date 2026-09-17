@@ -40,16 +40,16 @@ function StatCard({
   valueClassName?: string;
 }) {
   return (
-    <Card className="p-5">
+    <Card className="p-3.5">
       <div className="flex items-start justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           {label}
         </p>
-        <span className={clsx("flex h-9 w-9 items-center justify-center rounded-lg", ACCENT_BG[accent])}>
+        <span className={clsx("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", ACCENT_BG[accent])}>
           {icon}
         </span>
       </div>
-      <div className="mt-3 flex items-baseline gap-1.5">
+      <div className="mt-1.5 flex items-baseline gap-1.5">
         <motion.span
           key={value}
           initial={{ opacity: 0.4, y: 4 }}
@@ -64,7 +64,7 @@ function StatCard({
         </motion.span>
         {unit && <span className="text-sm font-medium text-neutral-400">{unit}</span>}
       </div>
-      {hint && <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
+      {hint && <p className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400" title={hint}>{hint}</p>}
     </Card>
   );
 }

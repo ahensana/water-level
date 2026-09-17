@@ -137,3 +137,30 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Official record printing: readable on paper regardless of which theme was
+   active, no animation artifacts, cards don't split across a page break. */
+@media print {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  header {
+    position: static !important;
+  }
+
+  section {
+    break-inside: avoid;
+  }
+
+  .live-pulse::before {
+    display: none !important;
+  }
+}

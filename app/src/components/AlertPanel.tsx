@@ -10,9 +10,10 @@ interface AlertPanelProps {
   history: SessionHistoryPoint[];
   loadState: "loading" | "ready" | "error";
   quality: MonitorQualityState;
+  onOpenHistory: () => void;
 }
 
-export function AlertPanel({ reading, history, loadState, quality }: AlertPanelProps) {
+export function AlertPanel({ reading, history, loadState, quality, onOpenHistory }: AlertPanelProps) {
   if (loadState === "loading" || !reading) {
     return <ListSkeleton rows={3} />;
   }
@@ -30,7 +31,7 @@ export function AlertPanel({ reading, history, loadState, quality }: AlertPanelP
       </CardHeader>
       <CardBody>
         {reading.isSensorFault ? (
-          <div className="rounded-lg border border-critical-200 bg-critical-50 p-4 dark:border-critical-500/30 dark:bg-critical-500/10">
+          <div className="rounded-lg border border-critical-200 bg-critical-50 p-3 dark:border-critical-500/30 dark:bg-critical-500/10">
             <p className="text-sm font-semibold text-critical-700 dark:text-critical-400">
               No trusted water level
             </p>
@@ -40,7 +41,7 @@ export function AlertPanel({ reading, history, loadState, quality }: AlertPanelP
             </p>
           </div>
         ) : (
-          <div className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
+          <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-700">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-neutral-900 dark:text-white">
@@ -53,7 +54,7 @@ export function AlertPanel({ reading, history, loadState, quality }: AlertPanelP
               </div>
               <StatusBadge level={reading.alertLevel} label="Active" pulse />
             </div>
-            <p className="mt-3 text-sm text-neutral-600 dark:text-neutral-300">
+            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
               <span className="font-medium text-neutral-800 dark:text-neutral-100">Recommended action: </span>
               {ALERT_LEVEL_ACTION[reading.alertLevel]}
             </p>
@@ -61,7 +62,7 @@ export function AlertPanel({ reading, history, loadState, quality }: AlertPanelP
         )}
 
         {quality.faultCodes.length > 0 && (
-          <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50/60 px-3 py-2 dark:border-warning-500/20 dark:bg-warning-500/10">
+          <div className="mt-3 rounded-lg border border-warning-200 bg-warning-50/60 px-3 py-2 dark:border-warning-500/20 dark:bg-warning-500/10">
             <p className="text-xs font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-400">
               QA filters active
             </p>
@@ -82,17 +83,26 @@ export function AlertPanel({ reading, history, loadState, quality }: AlertPanelP
           </div>
         )}
 
-        <p className="mt-5 mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-          Trusted reading history
-        </p>
+        <div className="mt-3 mb-1.5 flex items-baseline justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+            Trusted reading history
+          </p>
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            className="text-xs font-medium text-primary-600 hover:underline dark:text-primary-400"
+          >
+            View full history
+          </button>
+        </div>
         {history.length === 0 ? (
           <p className="rounded-lg bg-neutral-50 px-3 py-4 text-center text-sm text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400">
             No trusted readings yet — waiting for valid A01 samples.
           </p>
         ) : (
-          <ul className="max-h-80 divide-y divide-neutral-100 overflow-y-auto dark:divide-neutral-800">
+          <ul className="max-h-64 divide-y divide-neutral-100 overflow-y-auto dark:divide-neutral-800">
             {[...history].reverse().slice(0, 80).map((point) => (
-              <li key={point.t} className="flex items-center justify-between gap-3 py-2.5">
+              <li key={point.t} className="flex items-center justify-between gap-3 py-1.5">
                 <span className="text-sm font-medium tabular-nums text-neutral-700 dark:text-neutral-200">
                   {Math.round(point.distanceMm)} mm
                   <span className="ml-1.5 text-xs font-normal text-neutral-400 dark:text-neutral-500">
@@ -110,6 +120,12 @@ export function AlertPanel({ reading, history, loadState, quality }: AlertPanelP
               </li>
             ))}
           </ul>
+        )}
+        {history.length > 80 && (
+          <p className="mt-1.5 text-[11px] text-neutral-400 dark:text-neutral-500">
+            Showing the latest 80 of {history.length.toLocaleString()} trusted readings in this session — open
+            the full history to filter by period, level, or alert band.
+          </p>
         )}
       </CardBody>
     </Card>

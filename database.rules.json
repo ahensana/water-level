@@ -1,0 +1,37 @@
+{
+  "rules": {
+    "water_monitor": {
+      "current": {
+        ".read": true,
+        "$readingId": {
+          ".write": "!data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['distance', 'timestamp'])",
+          "distance": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20000"
+          },
+          "timestamp": {
+            ".validate": "newData.isNumber()"
+          },
+          "pressure": {
+            ".validate": "newData.isNumber()"
+          },
+          "temperature": {
+            ".validate": "newData.isNumber()"
+          },
+          "height": {
+            ".validate": "newData.isNumber()"
+          },
+          "battery_voltage": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20"
+          },
+          "signal_strength": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 31"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    }
+  }
+}

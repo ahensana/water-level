@@ -3,20 +3,57 @@ import clsx from "clsx";
 import meeclLogo from "../assets/MeECL-Official-LOGO-300x300-1.png";
 import meeclLogoDark from "../assets/logo.png";
 import { ORG_INFO } from "../config";
+import { useCalibrationTrim } from "../hooks/useCalibrationTrim";
 import { useClock } from "../hooks/useClock";
-import type { ConnectionState } from "../types";
+import type {
+  ConnectionState,
+  DerivedReading,
+  MonitorQualityState,
+  RawWaterMonitorReading,
+  SessionHistoryPoint,
+} from "../types";
 
 interface HeaderProps {
   connection: ConnectionState;
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onOpenSensor: () => void;
+  onOpenReport: () => void;
+  onOpenHistory: () => void;
+  reading: DerivedReading | null;
+  history: SessionHistoryPoint[];
+  rawHistory: RawWaterMonitorReading[];
+  quality: MonitorQualityState;
 }
 
-export function Header({ connection, theme, onToggleTheme, onOpenSensor }: HeaderProps) {
+export function Header({
+  connection,
+  theme,
+  onToggleTheme,
+  onOpenSensor,
+  onOpenReport,
+  onOpenHistory,
+  reading,
+  history,
+  rawHistory,
+  quality,
+}: HeaderProps) {
   const now = useClock();
+  const trim = useCalibrationTrim();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [reportPending, setReportPending] = useState(false);
+
+  const handleDownloadReport = async () => {
+    setReportPending(true);
+    try {
+      // Loaded on demand: jsPDF is only needed when a report is requested.
+      const { downloadOperationsReport } = await import("../lib/reportPdf");
+      await downloadOperationsReport({ reading, history, rawHistory, quality });
+    } finally {
+      setReportPending(false);
+    }
+  };
 
   const systemOnline = connection.firebaseConnected && connection.browserOnline;
 
@@ -34,26 +71,44 @@ export function Header({ connection, theme, onToggleTheme, onOpenSensor }: Heade
 
   return (
     <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/95">
-      <div className="mx-auto flex h-16 max-w-360 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-14 max-w-360 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         {/* Logo + project name */}
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
           <img
             src={theme === "dark" ? meeclLogoDark : meeclLogo}
             alt={`${ORG_INFO.shortName} logo`}
-            className="h-10 w-10 shrink-0 rounded-lg object-contain"
+            className="h-8 w-8 shrink-0 rounded-lg object-contain"
           />
           <div className="min-w-0">
-            <p className="truncate text-sm font-bold leading-tight text-neutral-900 dark:text-white">
+            <h1 className="truncate text-sm font-bold leading-tight text-neutral-900 dark:text-white">
               {ORG_INFO.projectName}
-            </p>
+            </h1>
             <p className="truncate text-xs leading-tight text-neutral-500 dark:text-neutral-400">
-              {ORG_INFO.name}
+              {ORG_INFO.shortName} Reservoir Monitoring &amp; Early-Warning System
             </p>
           </div>
         </div>
 
-        {/* Date/time + system status - hidden on small screens to save space */}
-        <div className="hidden items-center gap-5 md:flex">
+        {/*
+          A manual trim silently shifting every displayed level is exactly the
+          kind of thing that gets forgotten and then mistrusted, so it is badged
+          at all breakpoints and kept in the printed record.
+        */}
+        {trim.offsetFt !== 0 && (
+          <button
+            type="button"
+            onClick={onOpenReport}
+            title={`Calibration trim of ${trim.offsetFt >= 0 ? "+" : "−"}${Math.abs(trim.offsetFt).toFixed(2)} ft is applied to all levels${trim.note ? ` · ${trim.note}` : ""}`}
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-warning-50 px-2.5 py-1 text-xs font-semibold text-warning-700 dark:bg-warning-500/10 dark:text-warning-500"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-warning-500" />
+            Trim {trim.offsetFt >= 0 ? "+" : "−"}
+            {Math.abs(trim.offsetFt).toFixed(2)} ft
+          </button>
+        )}
+
+        {/* Date/time + system status - hidden on small screens to save space, always shown when printing */}
+        <div className="hidden items-center gap-5 md:flex print:flex">
           <div className="text-right">
             <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">{dateLabel}</p>
             <p className="font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
@@ -81,8 +136,49 @@ export function Header({ connection, theme, onToggleTheme, onOpenSensor }: Heade
           </div>
         </div>
 
-        {/* Right controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Right controls - interactive only, not part of the printed record */}
+        <div className="flex items-center gap-1.5 print:hidden sm:gap-2">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            aria-label="Print official record"
+            title="Print official record"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 sm:flex dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <PrintIcon className="h-5 w-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadReport}
+            disabled={reportPending || !reading}
+            aria-label="Download operations report (PDF)"
+            title="Download 24h operations report (PDF)"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-40 sm:flex dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <ReportIcon className="h-5 w-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            aria-label="Trusted reading history"
+            title="Trusted reading history — filter by period, level, or alert band"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <ListIcon className="h-5 w-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenReport}
+            aria-label="Interval report and gauge cross-check"
+            title="Interval report & gauge cross-check"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <HistoryIcon className="h-5 w-5" />
+          </button>
+
           <button
             type="button"
             onClick={onOpenSensor}
@@ -166,6 +262,45 @@ function BellIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
       <path d="M6 8a6 6 0 1 1 12 0c0 3 1 5 1.5 6H4.5C5 13 6 11 6 8Z" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PrintIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M6 9V4h12v5" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="4" y="9" width="16" height="8" rx="1.5" />
+      <path d="M6 15h12v5H6z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ReportIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M14 3v5h5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8.5 13.5v4M12 11.5v6M15.5 15v3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ListIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M4 6h16M4 12h16M4 18h10" strokeLinecap="round" />
+      <circle cx="19" cy="18" r="2.2" />
+    </svg>
+  );
+}
+
+function HistoryIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.5 4.5V9H8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 7.5V12l3 1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -24,7 +24,7 @@ export function CardHeader({ children, className, ...rest }: CardProps) {
   return (
     <div
       className={clsx(
-        "flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800",
+        "flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-2.5 dark:border-neutral-800",
         className,
       )}
       {...rest}
@@ -50,7 +50,7 @@ export function CardTitle({ children, className, ...rest }: CardProps) {
 
 export function CardBody({ children, className, ...rest }: CardProps) {
   return (
-    <div className={clsx("p-5", className)} {...rest}>
+    <div className={clsx("p-4", className)} {...rest}>
       {children}
     </div>
   );

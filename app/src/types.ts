@@ -54,7 +54,9 @@ export type FaultCode =
   | "data_gap"
   | "stale"
   | "no_trusted_data"
-  | "high_reject_rate";
+  | "high_reject_rate"
+  /** Baseline re-adopted after a sustained step — sensor may have moved. */
+  | "resync";
 
 /** Fully derived, display-ready reading after the QA pipeline. */
 export interface DerivedReading {
@@ -97,6 +99,14 @@ export interface SessionHistoryPoint {
   /** Trusted / smoothed sensor-to-surface distance in millimetres. */
   distanceMm: number;
   trusted: boolean;
+  /** BMP280 air temperature (degC) at this sample, if published. */
+  temperatureC: number | null;
+  /** BMP280 barometric pressure (hPa) at this sample, if published. */
+  pressureHpa: number | null;
+  /** Modem battery voltage (V) at this sample, if published (~hourly). */
+  batteryVoltage: number | null;
+  /** GSM signal (raw CSQ, 0-31) at this sample, if published (~hourly). */
+  signalStrength: number | null;
 }
 
 export interface ConnectionState {

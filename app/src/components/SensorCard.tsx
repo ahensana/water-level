@@ -1,6 +1,8 @@
 import { useEffect, useId } from "react";
 import { SITE_CONFIG } from "../config";
+import { useCalibrationTrim } from "../hooks/useCalibrationTrim";
 import { FAULT_CODE_LABEL } from "../lib/sensorQuality";
+import { effectiveSensorElevationFt } from "../lib/waterLevel";
 import type { ConnectionState, DerivedReading, MonitorQualityState } from "../types";
 
 interface SensorCardProps {
@@ -14,6 +16,7 @@ interface SensorCardProps {
 
 export function SensorCard({ open, onClose, reading, connection, loadState, quality }: SensorCardProps) {
   const headingId = useId();
+  const trim = useCalibrationTrim();
 
   useEffect(() => {
     if (!open) return;
@@ -52,7 +55,7 @@ export function SensorCard({ open, onClose, reading, connection, loadState, qual
         aria-labelledby={headingId}
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-neutral-800 dark:ring-white/10"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4 dark:border-neutral-700">
+        <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-700">
           <div className="flex items-center gap-3">
             <h2 id={headingId} className="text-sm font-semibold text-neutral-900 dark:text-white">
               Sensor Monitoring
@@ -80,14 +83,14 @@ export function SensorCard({ open, onClose, reading, connection, loadState, qual
           </button>
         </div>
 
-        <div className="px-5 py-5">
+        <div className="px-4 py-4">
           {!ready ? (
             <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
               Waiting for the first sensor reading…
             </p>
           ) : (
             <>
-              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <Field label="Sensor Health" value={healthLabel} tone={healthTone} />
                 <Field
                   label="Connectivity"
@@ -98,7 +101,20 @@ export function SensorCard({ open, onClose, reading, connection, loadState, qual
                 <Field label="Full Capacity (FRL)" value={`${SITE_CONFIG.fullCapacityFt} ft`} />
                 <Field
                   label="Sensor Elevation"
-                  value={`${SITE_CONFIG.sensorElevationFt.toFixed(2)} ft`}
+                  value={
+                    trim.offsetFt === 0
+                      ? `${SITE_CONFIG.sensorElevationFt.toFixed(2)} ft`
+                      : `${effectiveSensorElevationFt().toFixed(2)} ft (trimmed)`
+                  }
+                />
+                <Field
+                  label="Calibration Trim"
+                  value={
+                    trim.offsetFt === 0
+                      ? "None"
+                      : `${trim.offsetFt >= 0 ? "+" : "−"}${Math.abs(trim.offsetFt).toFixed(2)} ft`
+                  }
+                  tone={trim.offsetFt === 0 ? undefined : "warning"}
                 />
                 <Field
                   label="Valid Range"
@@ -142,7 +158,7 @@ export function SensorCard({ open, onClose, reading, connection, loadState, qual
               </dl>
 
               {quality.faultCodes.length > 0 && (
-                <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/50">
+                <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/50">
                   <p className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">
                     Active fault codes
                   </p>
@@ -152,11 +168,20 @@ export function SensorCard({ open, onClose, reading, connection, loadState, qual
                 </div>
               )}
 
-              <p className="mt-4 border-t border-neutral-200 pt-3 text-xs text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+              <p className="mt-3 border-t border-neutral-200 pt-2.5 text-xs text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
                 Live level uses a median of recent trusted samples. Blind-zone (&lt;
                 {SITE_CONFIG.minValidDistanceMm} mm), no-echo (0), over-range, and unrealistic jumps are
                 rejected automatically so false echoes cannot move the staff-gauge reading.
               </p>
+              {trim.offsetFt !== 0 && (
+                <p className="mt-2 text-xs text-warning-700 dark:text-warning-500">
+                  A manual calibration trim of{" "}
+                  {`${trim.offsetFt >= 0 ? "+" : "−"}${Math.abs(trim.offsetFt).toFixed(2)}`} ft is applied to
+                  every level shown{trim.setAtMs && `, set ${new Date(trim.setAtMs).toLocaleString()}`}
+                  {trim.note && ` (${trim.note})`}. Clear it from the interval report if the sensor has been
+                  re-calibrated.
+                </p>
+              )}
             </>
           )}
         </div>
@@ -186,14 +211,16 @@ function Field({
 }: {
   label: string;
   value: string;
-  tone?: "success" | "critical";
+  tone?: "success" | "critical" | "warning";
 }) {
   const toneClass =
     tone === "success"
       ? "text-success-600 dark:text-success-500"
       : tone === "critical"
         ? "text-critical-600 dark:text-critical-500"
-        : "text-neutral-900 dark:text-white";
+        : tone === "warning"
+          ? "text-warning-700 dark:text-warning-500"
+          : "text-neutral-900 dark:text-white";
 
   return (
     <div>

@@ -1,4 +1,5 @@
 import { SITE_CONFIG } from "../config";
+import { getCalibrationOffsetFt } from "./calibration";
 import type { AlertLevel, RawWaterMonitorReading } from "../types";
 
 /** Metres → feet (international foot). */
@@ -6,9 +7,49 @@ export const METERS_TO_FEET = 3.28084;
 
 const MM_TO_FT = METERS_TO_FEET / 1000;
 
-/** Staff-gauge water level (ft) from A01 air-gap (mm). */
+/**
+ * Staff-gauge water level (ft) from A01 air-gap (mm).
+ *
+ * Includes the operator calibration trim, so every surface that derives a level
+ * — live reading, trend chart, exports, reports — moves together. Reading the
+ * trim here rather than threading it through each caller is deliberate: a level
+ * that is corrected in one view and not another is worse than no correction.
+ */
 export function distanceToWaterLevelFt(distanceMm: number): number {
-  return SITE_CONFIG.sensorElevationFt - distanceMm * MM_TO_FT;
+  return effectiveSensorElevationFt() - distanceMm * MM_TO_FT;
+}
+
+/**
+ * Alert level at each point of a chronological level series.
+ *
+ * Hysteresis is path-dependent by definition — whether 3200.02 ft counts as
+ * Warning depends on whether the reservoir arrived there rising or falling — so
+ * a single reading cannot be classified in isolation. Replaying the series is
+ * what makes the answer reproducible; it is shared rather than reimplemented so
+ * that the badge on a history row and the badge on the live gauge can never
+ * disagree about the same reading.
+ */
+export function replayAlertLevels(levelsFt: number[]): AlertLevel[] {
+  const out: AlertLevel[] = [];
+  let prior: AlertLevel | null = null;
+  for (const level of levelsFt) {
+    prior = classifyAlertLevel(level, prior);
+    out.push(prior);
+  }
+  return out;
+}
+
+/** Air-gap (mm) that would produce a given staff-gauge level — inverse of the above. */
+export function waterLevelFtToDistanceMm(waterLevelFt: number): number {
+  return (effectiveSensorElevationFt() - waterLevelFt) / MM_TO_FT;
+}
+
+/**
+ * Fitted sensor elevation plus any operator trim — the datum levels are
+ * actually derived against, and therefore the one to display or plot.
+ */
+export function effectiveSensorElevationFt(): number {
+  return SITE_CONFIG.sensorElevationFt + getCalibrationOffsetFt();
 }
 
 /**
@@ -114,6 +155,13 @@ export const ALERT_LEVEL_LABEL: Record<AlertLevel, string> = {
   normal: "Normal Level",
   warning: "Warning Level",
   critical: "Critical Level",
+};
+
+/** Compact band names, for chips and dense table cells where the full label wraps. */
+export const ALERT_LEVEL_SHORT: Record<AlertLevel, string> = {
+  normal: "Normal",
+  warning: "Warning",
+  critical: "Critical",
 };
 
 export const ALERT_LEVEL_ACTION: Record<AlertLevel, string> = {

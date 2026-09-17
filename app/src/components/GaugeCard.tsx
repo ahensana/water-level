@@ -12,8 +12,8 @@ interface GaugeCardProps {
   loadState: "loading" | "ready" | "error";
 }
 
-const SIZE = 260;
-const STROKE = 18;
+const SIZE = 208;
+const STROKE = 15;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
@@ -50,7 +50,7 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
           pulse={connection.deviceConnectivity === "online"}
         />
       </CardHeader>
-      <CardBody className="flex flex-col items-center gap-6 lg:flex-row lg:items-center lg:justify-around">
+      <CardBody className="flex flex-col items-center gap-4 lg:flex-row lg:items-center lg:justify-around">
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
           <svg
             width={SIZE}
@@ -109,28 +109,28 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
               key={pct.toFixed(1)}
               initial={{ opacity: 0.5 }}
               animate={{ opacity: 1 }}
-              className="text-4xl font-extrabold tabular-nums text-neutral-900 dark:text-white"
+              className="text-3xl font-extrabold tabular-nums text-neutral-900 dark:text-white"
             >
               {pct.toFixed(1)}%
             </motion.span>
-            <span className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
               of {SITE_CONFIG.fullCapacityFt} ft FRL
             </span>
-            <span className="mt-3 text-lg font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
+            <span className="mt-1.5 text-base font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
               {reading.waterLevelFt.toFixed(2)} ft
             </span>
-            <span className="text-sm tabular-nums text-neutral-500 dark:text-neutral-400">
+            <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
               {reading.waterLevelM.toFixed(2)} m
             </span>
           </div>
         </div>
 
-        <div className="flex w-full flex-col gap-5 sm:max-w-sm">
+        <div className="flex w-full flex-col gap-3 sm:max-w-sm">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
               Threshold Zones (staff gauge)
             </p>
-            <div className="grid grid-cols-1 gap-2">
+            <div className="grid grid-cols-1 gap-1.5">
               <ZoneRow
                 color={ZONE_COLORS.normal}
                 label="Safe Zone"
@@ -170,7 +170,7 @@ function ZoneRow({
 }) {
   return (
     <div
-      className={`relative flex items-center justify-between overflow-hidden rounded-lg border px-3 py-2 transition-colors ${
+      className={`relative flex items-center justify-between overflow-hidden rounded-lg border px-2.5 py-1.5 transition-colors ${
         active
           ? "border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/60"
           : "border-neutral-200/60 dark:border-neutral-800"

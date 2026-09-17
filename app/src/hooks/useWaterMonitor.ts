@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SITE_CONFIG } from "../config";
 import {
   subscribeToConnectionState,
@@ -7,7 +7,6 @@ import {
 } from "../lib/firebase";
 import { processMonitorPipeline } from "../lib/sensorQuality";
 import type {
-  AlertLevel,
   ConnectionState,
   DerivedReading,
   MonitorQualityState,
@@ -29,6 +28,8 @@ export interface WaterMonitorState {
   errorMessage: string | null;
   reading: DerivedReading | null;
   history: SessionHistoryPoint[];
+  /** Unfiltered readings as received, for analytics that need raw reporting cadence (e.g. uptime). */
+  rawHistory: RawWaterMonitorReading[];
   connection: ConnectionState;
   quality: MonitorQualityState;
 }
@@ -45,7 +46,6 @@ export function useWaterMonitor(): WaterMonitorState {
     typeof navigator === "undefined" ? true : navigator.onLine,
   );
   const [now, setNow] = useState(() => Date.now());
-  const previousAlertRef = useRef<AlertLevel | null>(null);
 
   useEffect(() => {
     const unsubscribeData = subscribeToWaterMonitor(
@@ -100,22 +100,13 @@ export function useWaterMonitor(): WaterMonitorState {
     return () => window.clearInterval(id);
   }, []);
 
-  const pipeline = useMemo(() => {
-    return processMonitorPipeline(
-      rawHistory,
-      rawData?.data ?? null,
-      rawData?.receivedAtMs ?? Date.now(),
-      previousAlertRef.current,
-    );
-    // `now` re-evaluates staleness every second without waiting for a new push.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional tick
-  }, [rawHistory, rawData, now]);
-
-  useEffect(() => {
-    if (pipeline.reading) {
-      previousAlertRef.current = pipeline.reading.alertLevel;
-    }
-  }, [pipeline.reading]);
+  // `now` ticks every second so staleness is re-evaluated without waiting for
+  // the next push — a device that goes quiet has to age into "offline" on its
+  // own, not stay green until it happens to report again.
+  const pipeline = useMemo(
+    () => processMonitorPipeline(rawHistory, rawData?.data ?? null, rawData?.receivedAtMs ?? now),
+    [rawHistory, rawData, now],
+  );
 
   const reading = pipeline.reading;
   const history = pipeline.history;
@@ -133,6 +124,7 @@ export function useWaterMonitor(): WaterMonitorState {
     errorMessage,
     reading,
     history,
+    rawHistory,
     quality,
     connection: {
       firebaseConnected,
