@@ -1,16 +1,25 @@
-import type { ConnectionState } from "../types";
+import type { ConnectionState, DerivedReading, MonitorQualityState } from "../types";
+import { SITE_CONFIG } from "../config";
 
 interface StatusBannerProps {
   loadState: "loading" | "ready" | "error";
   errorMessage: string | null;
   connection: ConnectionState;
+  reading: DerivedReading | null;
+  quality: MonitorQualityState;
 }
 
-export function StatusBanner({ loadState, errorMessage, connection }: StatusBannerProps) {
+export function StatusBanner({
+  loadState,
+  errorMessage,
+  connection,
+  reading,
+  quality,
+}: StatusBannerProps) {
   if (!connection.browserOnline) {
     return (
       <Banner tone="critical">
-        You are offline. Showing the last data received before the connection was lost.
+        You are offline. Showing the last trusted data received before the connection was lost.
       </Banner>
     );
   }
@@ -25,6 +34,29 @@ export function StatusBanner({ loadState, errorMessage, connection }: StatusBann
 
   if (!connection.firebaseConnected) {
     return <Banner tone="warning">Reconnecting to the real-time database…</Banner>;
+  }
+
+  if (connection.deviceConnectivity === "offline") {
+    return (
+      <Banner tone="critical">
+        Device offline — no trusted A01 reading within the last{" "}
+        {Math.round(SITE_CONFIG.offlineTimeoutMs / 1000)}s. Last good level held on screen; verify
+        modem/power on site.
+      </Banner>
+    );
+  }
+
+  if (reading?.isSensorFault || quality.quality === "fault") {
+    return (
+      <Banner tone="critical">
+        {quality.message ??
+          "Sensor fault — readings rejected (no echo / blind zone / out of range). Check A01 mounting."}
+      </Banner>
+    );
+  }
+
+  if (quality.quality === "degraded" && quality.message) {
+    return <Banner tone="warning">{quality.message}</Banner>;
   }
 
   return null;

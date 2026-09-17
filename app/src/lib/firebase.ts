@@ -1,5 +1,7 @@
 import { initializeApp } from "firebase/app";
 import {
+  endAt,
+  get,
   getDatabase,
   goOffline,
   goOnline,
@@ -8,7 +10,7 @@ import {
   orderByKey,
   query,
   ref,
-  set,
+  startAt,
 } from "firebase/database";
 import { onValue as onConnectedValue } from "firebase/database";
 import type { RawWaterMonitorReading } from "../types";
@@ -82,6 +84,61 @@ export function subscribeToHistory(
   );
 }
 
+/**
+ * Character set Firebase uses to encode push IDs, ordered so that lexical sort
+ * of the key matches chronological order.
+ */
+const PUSH_CHARS = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+
+/**
+ * The 8-character timestamp prefix Firebase would generate for a push key at
+ * `ms`. Push IDs begin with the write time encoded in base-64 over PUSH_CHARS,
+ * which is why keys sort chronologically — and why we can range-query by time
+ * without maintaining a separate index on the `timestamp` field.
+ */
+function pushKeyPrefixForTime(ms: number): string {
+  let remaining = Math.max(0, Math.floor(ms));
+  const chars = new Array<string>(8);
+  for (let i = 7; i >= 0; i--) {
+    chars[i] = PUSH_CHARS.charAt(remaining % 64);
+    remaining = Math.floor(remaining / 64);
+  }
+  return chars.join("");
+}
+
+/**
+ * One-shot fetch of every reading written between two instants.
+ *
+ * The live subscription only carries a rolling window, which is enough to drive
+ * the dashboard but not to audit an arbitrary past interval against the manual
+ * register. This pulls exactly the requested span on demand instead.
+ *
+ * The key range is padded because a push key encodes *server write* time while
+ * the reading carries its own device `timestamp`; the two can differ by the
+ * upload latency, so a tight range would clip readings at both ends. Callers
+ * filter to the exact window by device time afterwards.
+ */
+export async function fetchReadingsBetween(
+  path: string,
+  fromMs: number,
+  toMs: number,
+): Promise<RawWaterMonitorReading[]> {
+  const PAD_MS = 15 * 60 * 1000;
+  const rangeQuery = query(
+    ref(db, path),
+    orderByKey(),
+    startAt(pushKeyPrefixForTime(fromMs - PAD_MS)),
+    // Sorts after every 20-character key sharing this prefix.
+    endAt(`${pushKeyPrefixForTime(toMs + PAD_MS)}\uf8ff`),
+  );
+  const snapshot = await get(rangeQuery);
+  const readings: RawWaterMonitorReading[] = [];
+  snapshot.forEach((child) => {
+    readings.push(child.val() as RawWaterMonitorReading);
+  });
+  return readings;
+}
+
 /** Tracks the special `.info/connected` node to know if our socket is live. */
 export function subscribeToConnectionState(onChange: (connected: boolean) => void): () => void {
   const connectedRef = ref(db, ".info/connected");
@@ -93,23 +150,4 @@ export function subscribeToConnectionState(onChange: (connected: boolean) => voi
 export function forceReconnect(): void {
   goOffline(db);
   goOnline(db);
-}
-
-/** Subscribes to an arbitrary path, e.g. the editable site config node. */
-export function subscribeToPath<T>(
-  path: string,
-  onData: (data: T | null) => void,
-  onError: (error: Error) => void,
-): () => void {
-  const dataRef = ref(db, path);
-  return onValue(
-    dataRef,
-    (snapshot) => onData(snapshot.val()),
-    (error) => onError(error as Error),
-  );
-}
-
-/** Overwrites an arbitrary path, e.g. saving edited site config. */
-export async function writeToPath(path: string, value: unknown): Promise<void> {
-  await set(ref(db, path), value);
 }

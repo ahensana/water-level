@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { SITE_CONFIG, type EditableSiteConfig } from "../config";
+import { SITE_CONFIG } from "../config";
 import {
   subscribeToConnectionState,
   subscribeToHistory,
   subscribeToWaterMonitor,
 } from "../lib/firebase";
-import { deriveReading } from "../lib/waterLevel";
+import { processMonitorPipeline } from "../lib/sensorQuality";
 import type {
   ConnectionState,
   DerivedReading,
+  MonitorQualityState,
   RawWaterMonitorReading,
   SessionHistoryPoint,
 } from "../types";
@@ -27,25 +28,18 @@ export interface WaterMonitorState {
   errorMessage: string | null;
   reading: DerivedReading | null;
   history: SessionHistoryPoint[];
+  /** Unfiltered readings as received, for analytics that need raw reporting cadence (e.g. uptime). */
+  rawHistory: RawWaterMonitorReading[];
   connection: ConnectionState;
+  quality: MonitorQualityState;
 }
 
-/**
- * `siteConfig` is passed in (from useSiteConfig) rather than read internally,
- * so the displayed reading recomputes immediately whenever an operator edits
- * the mount height or alert thresholds - without waiting for a new sensor push.
- */
-export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorState {
+export function useWaterMonitor(): WaterMonitorState {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rawData, setRawData] = useState<{ data: RawWaterMonitorReading; receivedAtMs: number } | null>(
     null,
   );
-  // Full server-side history (oldest-first), fetched live from Firebase. Each
-  // record is a keyed child the firmware POSTed under water_monitor/current, so
-  // this is every reading ever stored - shared across devices and surviving
-  // refreshes. Derived into chart points below so the trend recomputes when
-  // site config changes.
   const [rawHistory, setRawHistory] = useState<RawWaterMonitorReading[]>([]);
   const [firebaseConnected, setFirebaseConnected] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(
@@ -72,14 +66,12 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
       },
     );
 
-    // Fetch (and stay subscribed to) the full server history for the trend chart.
     const unsubscribeHistory = subscribeToHistory(
       SITE_CONFIG.firebaseDataPath,
       HISTORY_LIMIT,
       (readings) => setRawHistory(readings.map((r) => r.value)),
       () => {
-        // History is non-critical; the live reading still drives the main UI.
-        // Swallow errors here rather than blanking the whole dashboard.
+        // History is non-critical; swallow errors rather than blanking the UI.
       },
     );
 
@@ -92,7 +84,6 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
     };
   }, []);
 
-  // Track browser-level connectivity (airplane mode, wifi loss, etc).
   useEffect(() => {
     const goOnline = () => setBrowserOnline(true);
     const goOffline = () => setBrowserOnline(false);
@@ -104,48 +95,27 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
     };
   }, []);
 
-  // Tick every second so "device offline due to staleness" / "last updated Xs ago" stay live.
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  // Recomputed whenever a new reading arrives OR the operator edits site config.
-  const reading = useMemo(() => {
-    if (!rawData) return null;
-    return deriveReading(rawData.data, rawData.receivedAtMs, siteConfig);
-  }, [rawData, siteConfig]);
+  // `now` ticks every second so staleness is re-evaluated without waiting for
+  // the next push — a device that goes quiet has to age into "offline" on its
+  // own, not stay green until it happens to report again.
+  const pipeline = useMemo(
+    () => processMonitorPipeline(rawHistory, rawData?.data ?? null, rawData?.receivedAtMs ?? now),
+    [rawHistory, rawData, now],
+  );
 
-  // Derive chart points from the full server history. Recomputes when new
-  // readings arrive or the operator edits site config (mount height shifts every
-  // level). Each record carries its own device timestamp, so deriveReading uses
-  // that for the x-axis; Date.now() is only a fallback for records with no
-  // timestamp. Drop any non-finite/fault points so the chart never chokes.
-  const history = useMemo<SessionHistoryPoint[]>(() => {
-    return rawHistory
-      .map((raw) => {
-        const d = deriveReading(raw, Date.now(), siteConfig);
-        return {
-          t: d.receivedAtMs,
-          waterLevelM: d.waterLevelM,
-          capacityPct: d.capacityPct,
-          distanceM: d.distanceM,
-        };
-      })
-      .filter(
-        (p) =>
-          Number.isFinite(p.t) &&
-          Number.isFinite(p.waterLevelM) &&
-          Number.isFinite(p.distanceM) &&
-          Number.isFinite(p.capacityPct),
-      )
-      .sort((a, b) => a.t - b.t);
-  }, [rawHistory, siteConfig]);
+  const reading = pipeline.reading;
+  const history = pipeline.history;
+  const quality: MonitorQualityState = pipeline.report;
 
   const deviceConnectivity =
-    reading == null
+    reading == null || reading.isSensorFault
       ? "unknown"
-      : now - reading.receivedAtMs > SITE_CONFIG.offlineTimeoutMs
+      : now - reading.receivedAtMs > SITE_CONFIG.offlineTimeoutMs || reading.isStale
         ? "offline"
         : "online";
 
@@ -154,6 +124,8 @@ export function useWaterMonitor(siteConfig: EditableSiteConfig): WaterMonitorSta
     errorMessage,
     reading,
     history,
+    rawHistory,
+    quality,
     connection: {
       firebaseConnected,
       browserOnline,

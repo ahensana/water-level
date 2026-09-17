@@ -1,94 +1,66 @@
-import { SITE_CONFIG, type EditableSiteConfig } from "../config";
-import type { AlertLevel, DerivedReading, RawWaterMonitorReading } from "../types";
+import { SITE_CONFIG } from "../config";
+import { getCalibrationOffsetFt } from "./calibration";
+import type { AlertLevel, RawWaterMonitorReading } from "../types";
+
+/** Metres → feet (international foot). */
+export const METERS_TO_FEET = 3.28084;
+
+const MM_TO_FT = METERS_TO_FEET / 1000;
 
 /**
- * Converts a raw Firebase payload into a fully derived reading.
+ * Staff-gauge water level (ft) from A01 air-gap (mm).
  *
- * Water Level = Sensor Mounting Height - Distance to Water Surface
- *
- * `siteConfig` (mount height + thresholds) is passed in rather than imported
- * as a static constant because it is user-editable at runtime (see
- * useSiteConfig) - this function must reflect whatever the operator has
- * currently configured, not a fixed default.
+ * Includes the operator calibration trim, so every surface that derives a level
+ * — live reading, trend chart, exports, reports — moves together. Reading the
+ * trim here rather than threading it through each caller is deliberate: a level
+ * that is corrected in one view and not another is worse than no correction.
  */
-export function deriveReading(
-  raw: RawWaterMonitorReading,
-  receivedAtMs: number,
-  siteConfig: EditableSiteConfig,
-): DerivedReading {
-  const distanceM = resolveDistanceMeters(raw);
-
-  const isSensorFault =
-    !Number.isFinite(distanceM) ||
-    distanceM < SITE_CONFIG.minValidDistanceM ||
-    distanceM > SITE_CONFIG.maxValidDistanceM;
-
-  const rawLevel = siteConfig.sensorMountHeightM - distanceM;
-  const waterLevelM = clamp(rawLevel, 0, siteConfig.sensorMountHeightM);
-  const capacityPct = clamp((waterLevelM / siteConfig.sensorMountHeightM) * 100, 0, 100);
-
-  // Prefer a real device timestamp so "Last Updated" reflects true sensor age
-  // and survives page refreshes. The current firmware publishes a human-readable
-  // clock string ("24-Jun-2026 16:32:00"); older payloads used a numeric
-  // timestamp_ms. Fall back to the browser receive-time when neither is present.
-  const deviceTimeMs = resolveDeviceTimeMs(raw);
-  const effectiveTimeMs = deviceTimeMs ?? receivedAtMs;
-
-  return {
-    distanceM,
-    waterLevelM,
-    capacityPct,
-    alertLevel: classifyAlertLevel(capacityPct, siteConfig),
-    isSensorFault,
-    receivedAtMs: effectiveTimeMs,
-    deviceReportedAt: formatDeviceReportedAt(raw),
-    batteryVoltage:
-      typeof raw.battery_voltage === "number" && Number.isFinite(raw.battery_voltage)
-        ? raw.battery_voltage
-        : null,
-    signalStrength:
-      typeof raw.signal_strength === "number" && Number.isFinite(raw.signal_strength)
-        ? raw.signal_strength
-        : null,
-    pressureHpa: resolvePressure(raw.pressure),
-    temperatureC: resolveFinite(raw.temperature),
-    heightM: resolveFinite(raw.height),
-    remotePressureHpa: resolvePressure(raw.remote_pressure),
-  };
+export function distanceToWaterLevelFt(distanceMm: number): number {
+  return effectiveSensorElevationFt() - distanceMm * MM_TO_FT;
 }
 
 /**
- * Normalises a pressure field (hPa) to a finite positive number or null. Older
- * firmware wrote -1 when a sensor was unavailable, so treat non-positive values
- * as "not reported". The current firmware omits the field entirely instead.
- */
-function resolvePressure(value: number | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
-}
-
-/**
- * Normalises a signed measurement to a finite number or null. Unlike pressure,
- * temperature and baseline-relative height are legitimately zero or negative, so
- * only non-finite/missing values count as "not reported".
- */
-function resolveFinite(value: number | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-/**
- * Resolves the sensor-to-water distance in METRES from whichever field the
- * payload carries.
+ * Alert level at each point of a chronological level series.
  *
- * The current firmware (A01NYUB ultrasonic) writes `distance` in MILLIMETRES,
- * so that takes priority and is converted to metres. The remaining fields are
- * legacy metre/cm variants kept for backward compatibility with older stored
- * readings.
+ * Hysteresis is path-dependent by definition — whether 3200.02 ft counts as
+ * Warning depends on whether the reservoir arrived there rising or falling — so
+ * a single reading cannot be classified in isolation. Replaying the series is
+ * what makes the answer reproducible; it is shared rather than reimplemented so
+ * that the badge on a history row and the badge on the live gauge can never
+ * disagree about the same reading.
  */
-function resolveDistanceMeters(raw: RawWaterMonitorReading): number {
-  if (typeof raw.distance === "number") return raw.distance / 1000;
-  if (typeof raw.distance_m === "number") return raw.distance_m;
-  if (typeof raw.depth_m === "number") return raw.depth_m;
-  if (typeof raw.depth_cm === "number") return raw.depth_cm / 100;
+export function replayAlertLevels(levelsFt: number[]): AlertLevel[] {
+  const out: AlertLevel[] = [];
+  let prior: AlertLevel | null = null;
+  for (const level of levelsFt) {
+    prior = classifyAlertLevel(level, prior);
+    out.push(prior);
+  }
+  return out;
+}
+
+/** Air-gap (mm) that would produce a given staff-gauge level — inverse of the above. */
+export function waterLevelFtToDistanceMm(waterLevelFt: number): number {
+  return (effectiveSensorElevationFt() - waterLevelFt) / MM_TO_FT;
+}
+
+/**
+ * Fitted sensor elevation plus any operator trim — the datum levels are
+ * actually derived against, and therefore the one to display or plot.
+ */
+export function effectiveSensorElevationFt(): number {
+  return SITE_CONFIG.sensorElevationFt + getCalibrationOffsetFt();
+}
+
+/**
+ * Resolves sensor-to-water distance in MILLIMETRES.
+ * Prefer the firmware `distance` (mm); convert legacy m/cm fields.
+ */
+export function resolveDistanceMm(raw: RawWaterMonitorReading): number {
+  if (typeof raw.distance === "number") return raw.distance;
+  if (typeof raw.distance_m === "number") return raw.distance_m * 1000;
+  if (typeof raw.depth_m === "number") return raw.depth_m * 1000;
+  if (typeof raw.depth_cm === "number") return raw.depth_cm * 10;
   return NaN;
 }
 
@@ -97,39 +69,21 @@ const MONTHS = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/**
- * Resolves a device-reported time (epoch ms) from whichever timestamp field the
- * payload carries. Returns null if no parseable device time is present, so the
- * caller can fall back to the browser receive-time.
- *
- * The firmware emits the SIM800 network clock as "DD-Mon-YYYY HH:MM:SS", e.g.
- * "24-Jun-2026 16:32:00", in local network time (no timezone in the string), so
- * we parse it as local time.
- */
-function resolveDeviceTimeMs(raw: RawWaterMonitorReading): number | null {
+export function resolveDeviceTimeMs(raw: RawWaterMonitorReading): number | null {
   if (typeof raw.timestamp_ms === "number" && Number.isFinite(raw.timestamp_ms)) {
     return raw.timestamp_ms;
   }
-
-  // Current firmware: numeric Firebase server timestamp in epoch milliseconds.
   if (typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)) {
     return raw.timestamp;
   }
-
   if (typeof raw.timestamp === "string") {
     const parsed = parseDeviceTimestamp(raw.timestamp);
     if (parsed !== null) return parsed;
   }
-
   return null;
 }
 
-/**
- * Builds the human-readable "device reported at" string shown in the UI. A
- * numeric epoch-ms timestamp is formatted to a locale string; a string timestamp
- * is passed through as-is; otherwise falls back to the legacy `updated_at`.
- */
-function formatDeviceReportedAt(raw: RawWaterMonitorReading): string | null {
+export function formatDeviceReportedAt(raw: RawWaterMonitorReading): string | null {
   if (typeof raw.timestamp === "number" && Number.isFinite(raw.timestamp)) {
     return new Date(raw.timestamp).toLocaleString();
   }
@@ -137,7 +91,6 @@ function formatDeviceReportedAt(raw: RawWaterMonitorReading): string | null {
   return raw.updated_at ?? null;
 }
 
-/** Parses "DD-Mon-YYYY HH:MM:SS" (local time) into epoch ms, or null if unparseable. */
 function parseDeviceTimestamp(value: string): number | null {
   const match = value
     .trim()
@@ -160,15 +113,40 @@ function parseDeviceTimestamp(value: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-export function classifyAlertLevel(capacityPct: number, siteConfig: EditableSiteConfig): AlertLevel {
-  if (capacityPct >= siteConfig.criticalThresholdPct) return "critical";
-  if (capacityPct >= siteConfig.warningThresholdPct) return "warning";
+/**
+ * Alert from absolute staff-gauge level (ft) with hysteresis so values
+ * flickering around a threshold do not chatter Normal↔Warning↔Critical.
+ */
+export function classifyAlertLevel(
+  waterLevelFt: number,
+  previous: AlertLevel | null = null,
+): AlertLevel {
+  const h = SITE_CONFIG.alertHysteresisFt;
+  const warn = SITE_CONFIG.warningLevelFt;
+  const crit = SITE_CONFIG.criticalLevelFt;
+
+  if (previous === "critical") {
+    if (waterLevelFt >= crit - h) return "critical";
+    if (waterLevelFt >= warn - h) return "warning";
+    return "normal";
+  }
+  if (previous === "warning") {
+    if (waterLevelFt >= crit) return "critical";
+    if (waterLevelFt >= warn - h) return "warning";
+    return "normal";
+  }
+
+  if (waterLevelFt >= crit) return "critical";
+  if (waterLevelFt >= warn) return "warning";
   return "normal";
 }
 
+/** Capacity % of full reservoir (3220 ft) for a given staff-gauge level. */
+export function levelToCapacityPct(waterLevelFt: number): number {
+  return clamp((waterLevelFt / SITE_CONFIG.fullCapacityFt) * 100, 0, 100);
+}
+
 export function clamp(value: number, min: number, max: number): number {
-  // Treat non-finite input (NaN from a missing/null Firebase field) as the
-  // minimum, so derived values are always real numbers and never crash the UI.
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
 }
@@ -179,8 +157,15 @@ export const ALERT_LEVEL_LABEL: Record<AlertLevel, string> = {
   critical: "Critical Level",
 };
 
+/** Compact band names, for chips and dense table cells where the full label wraps. */
+export const ALERT_LEVEL_SHORT: Record<AlertLevel, string> = {
+  normal: "Normal",
+  warning: "Warning",
+  critical: "Critical",
+};
+
 export const ALERT_LEVEL_ACTION: Record<AlertLevel, string> = {
   normal: "No action required. Continue routine monitoring.",
-  warning: "Notify site operator. Prepare contingency / drawdown plan.",
-  critical: "Immediate inspection required. Notify emergency response team.",
+  warning: `Notify site operator. Level at/above ${SITE_CONFIG.warningLevelFt} ft — prepare contingency / drawdown plan toward FRL ${SITE_CONFIG.fullCapacityFt} ft.`,
+  critical: `Immediate inspection required. Level at/above ${SITE_CONFIG.criticalLevelFt} ft (FRL ${SITE_CONFIG.fullCapacityFt} ft). Notify emergency response team.`,
 };

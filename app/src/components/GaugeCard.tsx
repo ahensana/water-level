@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
-import type { EditableSiteConfig } from "../config";
-import { ALERT_LEVEL_LABEL } from "../lib/waterLevel";
+import { SITE_CONFIG } from "../config";
+import { ALERT_LEVEL_LABEL, levelToCapacityPct } from "../lib/waterLevel";
 import type { ConnectionState, DerivedReading } from "../types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -10,19 +10,16 @@ interface GaugeCardProps {
   reading: DerivedReading | null;
   connection: ConnectionState;
   loadState: "loading" | "ready" | "error";
-  siteConfig: EditableSiteConfig;
 }
 
-const SIZE = 260;
-const STROKE = 18;
+const SIZE = 208;
+const STROKE = 15;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-// Gauge spans 270 degrees (start at -225deg, i.e. bottom-left, sweeping clockwise),
-// leaving a gap at the bottom for a clean instrument-panel look.
 const ARC_FRACTION = 0.75;
 const ARC_LENGTH = CIRCUMFERENCE * ARC_FRACTION;
-const ROTATION_DEG = 135; // rotates the start of the arc to the bottom-left gap
+const ROTATION_DEG = 135;
 
 const ZONE_COLORS = {
   normal: "#22c55e",
@@ -30,8 +27,8 @@ const ZONE_COLORS = {
   critical: "#ef4444",
 };
 
-export function GaugeCard({ reading, connection, loadState, siteConfig }: GaugeCardProps) {
-  if (loadState === "loading" || !reading) {
+export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
+  if (loadState === "loading" || !reading || reading.isSensorFault) {
     return <GaugeSkeleton />;
   }
 
@@ -39,6 +36,9 @@ export function GaugeCard({ reading, connection, loadState, siteConfig }: GaugeC
   const valueArcLength = (pct / 100) * ARC_LENGTH;
   const trackDashArray = `${ARC_LENGTH} ${CIRCUMFERENCE}`;
   const color = ZONE_COLORS[reading.alertLevel];
+
+  const warningPct = levelToCapacityPct(SITE_CONFIG.warningLevelFt);
+  const criticalPct = levelToCapacityPct(SITE_CONFIG.criticalLevelFt);
 
   return (
     <Card>
@@ -50,11 +50,16 @@ export function GaugeCard({ reading, connection, loadState, siteConfig }: GaugeC
           pulse={connection.deviceConnectivity === "online"}
         />
       </CardHeader>
-      <CardBody className="flex flex-col items-center gap-6 lg:flex-row lg:items-center lg:justify-around">
+      <CardBody className="flex flex-col items-center gap-4 lg:flex-row lg:items-center lg:justify-around">
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
-          <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={`Water level gauge showing ${pct.toFixed(1)} percent capacity`}>
+          <svg
+            width={SIZE}
+            height={SIZE}
+            viewBox={`0 0 ${SIZE} ${SIZE}`}
+            role="img"
+            aria-label={`Water level gauge showing ${pct.toFixed(1)} percent of ${SITE_CONFIG.fullCapacityFt} ft full capacity`}
+          >
             <g transform={`rotate(${ROTATION_DEG} ${SIZE / 2} ${SIZE / 2})`}>
-              {/* Background track */}
               <circle
                 cx={SIZE / 2}
                 cy={SIZE / 2}
@@ -66,23 +71,24 @@ export function GaugeCard({ reading, connection, loadState, siteConfig }: GaugeC
                 strokeDasharray={trackDashArray}
                 strokeLinecap="round"
               />
-              {/* Zone reference ticks: warning + critical thresholds */}
-              {[siteConfig.warningThresholdPct, siteConfig.criticalThresholdPct].map((threshold) => {
-                const angle = (threshold / 100) * ARC_FRACTION * 360;
+              {[
+                { pct: warningPct, color: ZONE_COLORS.warning },
+                { pct: criticalPct, color: ZONE_COLORS.critical },
+              ].map((tick) => {
+                const angle = (tick.pct / 100) * ARC_FRACTION * 360;
                 return (
                   <line
-                    key={threshold}
+                    key={tick.pct}
                     x1={SIZE / 2}
                     y1={STROKE / 2}
                     x2={SIZE / 2}
                     y2={STROKE / 2 + 10}
-                    stroke={threshold >= siteConfig.criticalThresholdPct ? ZONE_COLORS.critical : ZONE_COLORS.warning}
+                    stroke={tick.color}
                     strokeWidth={3}
                     transform={`rotate(${angle} ${SIZE / 2} ${SIZE / 2})`}
                   />
                 );
               })}
-              {/* Value arc */}
               <motion.circle
                 cx={SIZE / 2}
                 cy={SIZE / 2}
@@ -103,34 +109,44 @@ export function GaugeCard({ reading, connection, loadState, siteConfig }: GaugeC
               key={pct.toFixed(1)}
               initial={{ opacity: 0.5 }}
               animate={{ opacity: 1 }}
-              className="text-4xl font-extrabold tabular-nums text-neutral-900 dark:text-white"
+              className="text-3xl font-extrabold tabular-nums text-neutral-900 dark:text-white"
             >
               {pct.toFixed(1)}%
             </motion.span>
-            <span className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Capacity Filled</span>
-            <span className="mt-3 text-lg font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              of {SITE_CONFIG.fullCapacityFt} ft FRL
+            </span>
+            <span className="mt-1.5 text-base font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
+              {reading.waterLevelFt.toFixed(2)} ft
+            </span>
+            <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
               {reading.waterLevelM.toFixed(2)} m
             </span>
           </div>
         </div>
 
-        <div className="flex w-full flex-col gap-5 sm:max-w-sm">
+        <div className="flex w-full flex-col gap-3 sm:max-w-sm">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-              Threshold Zones
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              Threshold Zones (staff gauge)
             </p>
-            <div className="grid grid-cols-1 gap-2">
-              <ZoneRow color={ZONE_COLORS.normal} label="Safe Zone" range={`0% – ${siteConfig.warningThresholdPct}%`} active={reading.alertLevel === "normal"} />
+            <div className="grid grid-cols-1 gap-1.5">
+              <ZoneRow
+                color={ZONE_COLORS.normal}
+                label="Safe Zone"
+                range={`Below ${SITE_CONFIG.warningLevelFt} ft`}
+                active={reading.alertLevel === "normal"}
+              />
               <ZoneRow
                 color={ZONE_COLORS.warning}
                 label="Warning Zone"
-                range={`${siteConfig.warningThresholdPct}% – ${siteConfig.criticalThresholdPct}%`}
+                range={`${SITE_CONFIG.warningLevelFt} – ${SITE_CONFIG.criticalLevelFt} ft`}
                 active={reading.alertLevel === "warning"}
               />
               <ZoneRow
                 color={ZONE_COLORS.critical}
                 label="Critical Zone"
-                range={`Above ${siteConfig.criticalThresholdPct}%`}
+                range={`${SITE_CONFIG.criticalLevelFt} – ${SITE_CONFIG.fullCapacityFt} ft FRL`}
                 active={reading.alertLevel === "critical"}
               />
             </div>
@@ -154,7 +170,7 @@ function ZoneRow({
 }) {
   return (
     <div
-      className={`relative flex items-center justify-between overflow-hidden rounded-lg border px-3 py-2 transition-colors ${
+      className={`relative flex items-center justify-between overflow-hidden rounded-lg border px-2.5 py-1.5 transition-colors ${
         active
           ? "border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/60"
           : "border-neutral-200/60 dark:border-neutral-800"

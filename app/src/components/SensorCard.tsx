@@ -1,6 +1,9 @@
 import { useEffect, useId } from "react";
-import { SITE_CONFIG, type EditableSiteConfig } from "../config";
-import type { ConnectionState, DerivedReading } from "../types";
+import { SITE_CONFIG } from "../config";
+import { useCalibrationTrim } from "../hooks/useCalibrationTrim";
+import { FAULT_CODE_LABEL } from "../lib/sensorQuality";
+import { effectiveSensorElevationFt } from "../lib/waterLevel";
+import type { ConnectionState, DerivedReading, MonitorQualityState } from "../types";
 
 interface SensorCardProps {
   open: boolean;
@@ -8,14 +11,13 @@ interface SensorCardProps {
   reading: DerivedReading | null;
   connection: ConnectionState;
   loadState: "loading" | "ready" | "error";
-  /** Accepted for call-site compatibility; sensor readings here don't depend on it. */
-  siteConfig?: EditableSiteConfig;
+  quality: MonitorQualityState;
 }
 
-export function SensorCard({ open, onClose, reading, connection, loadState }: SensorCardProps) {
+export function SensorCard({ open, onClose, reading, connection, loadState, quality }: SensorCardProps) {
   const headingId = useId();
+  const trim = useCalibrationTrim();
 
-  // Close on Escape while the modal is open.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -29,6 +31,15 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
 
   const ready = loadState !== "loading" && reading !== null;
   const isOnline = connection.deviceConnectivity === "online";
+  const healthLabel = !ready
+    ? "—"
+    : reading!.isSensorFault
+      ? "Fault"
+      : quality.quality === "degraded"
+        ? "Degraded"
+        : "Healthy";
+  const healthTone =
+    healthLabel === "Healthy" ? "success" : healthLabel === "Degraded" ? undefined : "critical";
 
   return (
     <div
@@ -42,9 +53,9 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
-        className="w-full max-w-lg rounded-xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-neutral-800 dark:ring-white/10"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-neutral-800 dark:ring-white/10"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4 dark:border-neutral-700">
+        <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-700">
           <div className="flex items-center gap-3">
             <h2 id={headingId} className="text-sm font-semibold text-neutral-900 dark:text-white">
               Sensor Monitoring
@@ -72,27 +83,55 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
           </button>
         </div>
 
-        <div className="px-5 py-5">
+        <div className="px-4 py-4">
           {!ready ? (
             <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
               Waiting for the first sensor reading…
             </p>
           ) : (
             <>
-              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <Field
-                  label="Sensor Health"
-                  value={reading!.isSensorFault ? "Fault" : "Normal"}
-                  tone={reading!.isSensorFault ? "critical" : "success"}
-                />
+              <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <Field label="Sensor Health" value={healthLabel} tone={healthTone} />
                 <Field
                   label="Connectivity"
                   value={connection.firebaseConnected ? "Connected" : "Disconnected"}
                   tone={connection.firebaseConnected ? "success" : "critical"}
                 />
-                <Field label="Valid Range" value={`${SITE_CONFIG.minValidDistanceM.toFixed(2)}–${SITE_CONFIG.maxValidDistanceM.toFixed(2)} m`} />
+                <Field label="QA Status" value={quality.quality.toUpperCase()} />
+                <Field label="Full Capacity (FRL)" value={`${SITE_CONFIG.fullCapacityFt} ft`} />
                 <Field
-                  label="Last Communication"
+                  label="Sensor Elevation"
+                  value={
+                    trim.offsetFt === 0
+                      ? `${SITE_CONFIG.sensorElevationFt.toFixed(2)} ft`
+                      : `${effectiveSensorElevationFt().toFixed(2)} ft (trimmed)`
+                  }
+                />
+                <Field
+                  label="Calibration Trim"
+                  value={
+                    trim.offsetFt === 0
+                      ? "None"
+                      : `${trim.offsetFt >= 0 ? "+" : "−"}${Math.abs(trim.offsetFt).toFixed(2)} ft`
+                  }
+                  tone={trim.offsetFt === 0 ? undefined : "warning"}
+                />
+                <Field
+                  label="Valid Range"
+                  value={`${SITE_CONFIG.minValidDistanceMm}–${SITE_CONFIG.maxValidDistanceMm} mm`}
+                />
+                <Field label="Trusted Distance" value={`${Math.round(reading!.distanceMm)} mm`} />
+                <Field label="Raw Distance" value={`${Math.round(reading!.rawDistanceMm)} mm`} />
+                <Field
+                  label="Water Level"
+                  value={
+                    reading!.isSensorFault
+                      ? "—"
+                      : `${reading!.waterLevelFt.toFixed(2)} ft / ${reading!.waterLevelM.toFixed(2)} m`
+                  }
+                />
+                <Field
+                  label="Last Trusted"
                   value={new Date(reading!.receivedAtMs).toLocaleTimeString(undefined, {
                     hour: "2-digit",
                     minute: "2-digit",
@@ -102,7 +141,9 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
                 <Field
                   label="Battery"
                   value={reading!.batteryVoltage !== null ? `${reading!.batteryVoltage.toFixed(2)} V` : "—"}
-                  tone={reading!.batteryVoltage !== null && reading!.batteryVoltage < 3.5 ? "critical" : undefined}
+                  tone={
+                    reading!.batteryVoltage !== null && reading!.batteryVoltage < 3.5 ? "critical" : undefined
+                  }
                 />
                 <Field label="Signal" value={formatSignal(reading!.signalStrength)} />
                 <Field
@@ -113,17 +154,34 @@ export function SensorCard({ open, onClose, reading, connection, loadState }: Se
                   label="Temperature"
                   value={reading!.temperatureC !== null ? `${reading!.temperatureC.toFixed(1)} °C` : "—"}
                 />
-                <Field
-                  label="Height vs Baseline"
-                  value={reading!.heightM !== null ? `${reading!.heightM.toFixed(2)} m` : "—"}
-                />
+                <Field label="Live Samples" value={String(quality.liveSampleCount)} />
               </dl>
-              <p className="mt-4 border-t border-neutral-200 pt-3 text-xs text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
-                A “—” means the current device isn’t reporting that value. Battery and signal
-                require modem telemetry the present firmware doesn’t publish; temperature,
-                pressure and height come from the BMP280 and read “—” if it wasn’t detected
-                at boot.
+
+              {quality.faultCodes.length > 0 && (
+                <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/50">
+                  <p className="text-xs font-semibold text-neutral-600 dark:text-neutral-300">
+                    Active fault codes
+                  </p>
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    {quality.faultCodes.map((c) => FAULT_CODE_LABEL[c]).join(" · ")}
+                  </p>
+                </div>
+              )}
+
+              <p className="mt-3 border-t border-neutral-200 pt-2.5 text-xs text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+                Live level uses a median of recent trusted samples. Blind-zone (&lt;
+                {SITE_CONFIG.minValidDistanceMm} mm), no-echo (0), over-range, and unrealistic jumps are
+                rejected automatically so false echoes cannot move the staff-gauge reading.
               </p>
+              {trim.offsetFt !== 0 && (
+                <p className="mt-2 text-xs text-warning-700 dark:text-warning-500">
+                  A manual calibration trim of{" "}
+                  {`${trim.offsetFt >= 0 ? "+" : "−"}${Math.abs(trim.offsetFt).toFixed(2)}`} ft is applied to
+                  every level shown{trim.setAtMs && `, set ${new Date(trim.setAtMs).toLocaleString()}`}
+                  {trim.note && ` (${trim.note})`}. Clear it from the interval report if the sensor has been
+                  re-calibrated.
+                </p>
+              )}
             </>
           )}
         </div>
@@ -140,10 +198,6 @@ function CloseIcon({ className }: { className?: string }) {
   );
 }
 
-/**
- * Formats a raw GSM CSQ value (0–31, per AT+CSQ) into a readable label with an
- * approximate dBm. 99 means "not detectable". Anything out of range renders "—".
- */
 function formatSignal(csq: number | null): string {
   if (csq === null || csq === 99 || csq < 0 || csq > 31) return "—";
   const dbm = -113 + 2 * csq;
@@ -157,14 +211,16 @@ function Field({
 }: {
   label: string;
   value: string;
-  tone?: "success" | "critical";
+  tone?: "success" | "critical" | "warning";
 }) {
   const toneClass =
     tone === "success"
       ? "text-success-600 dark:text-success-500"
       : tone === "critical"
         ? "text-critical-600 dark:text-critical-500"
-        : "text-neutral-900 dark:text-white";
+        : tone === "warning"
+          ? "text-warning-700 dark:text-warning-500"
+          : "text-neutral-900 dark:text-white";
 
   return (
     <div>

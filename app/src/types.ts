@@ -42,33 +42,51 @@ export type AlertLevel = "normal" | "warning" | "critical";
 
 export type DeviceConnectivity = "online" | "offline" | "unknown";
 
-/** Fully derived, display-ready reading computed from the raw Firebase payload. */
+/** Overall trust in the live derived reading. */
+export type DataQuality = "good" | "degraded" | "fault";
+
+export type FaultCode =
+  | "invalid_distance"
+  | "no_echo"
+  | "blind_zone"
+  | "out_of_range"
+  | "spike"
+  | "data_gap"
+  | "stale"
+  | "no_trusted_data"
+  | "high_reject_rate"
+  /** Baseline re-adopted after a sustained step — sensor may have moved. */
+  | "resync";
+
+/** Fully derived, display-ready reading after the QA pipeline. */
 export interface DerivedReading {
-  /** Distance from sensor to water surface (m), as reported by the sensor. */
-  distanceM: number;
-  /** Computed water level = mount height - distance (m), clamped to [0, mountHeight]. */
+  /** Trusted / median-smoothed distance (mm). */
+  distanceMm: number;
+  /** Latest raw distance before smoothing (mm), for diagnostics. */
+  rawDistanceMm: number;
+  /** Computed water level in metres (from calibrated feet). */
   waterLevelM: number;
-  /** Water level as a percentage of the sensor mount height. */
+  /** Staff-gauge water level in feet — matches field logbooks. */
+  waterLevelFt: number;
+  /** Water level as % of full capacity (3220 ft FRL). */
   capacityPct: number;
-  /** Zone classification derived from capacityPct against configured thresholds. */
+  /** Zone classification with hysteresis. */
   alertLevel: AlertLevel;
-  /** True if the raw distance reading is outside the physically valid range. */
+  /** True when no trusted level could be computed. */
   isSensorFault: boolean;
-  /** Timestamp (client-side, ms since epoch) when this reading was received. */
+  /** True when the trusted sample is older than the offline timeout. */
+  isStale: boolean;
+  /** True when live value used a multi-sample median. */
+  isSmoothed: boolean;
+  faultCodes: FaultCode[];
+  /** Device (or receive) time of the anchor sample (ms since epoch). */
   receivedAtMs: number;
-  /** Raw device timestamp/updated_at string supplied by the device, if any. */
   deviceReportedAt: string | null;
-  /** Battery voltage (V) from the device, or null if not reported in this reading. */
   batteryVoltage: number | null;
-  /** GSM signal strength (raw CSQ 0–31), or null if not reported in this reading. */
   signalStrength: number | null;
-  /** Barometric pressure (hPa) from the on-device BMP280, or null if not reported. */
   pressureHpa: number | null;
-  /** Air temperature (degC) from the BMP280, or null if not reported. */
   temperatureC: number | null;
-  /** Barometric height (m) relative to the device's boot position, or null if not reported. */
   heightM: number | null;
-  /** Legacy: remote LoRa pressure (hPa). Always null with the current firmware. */
   remotePressureHpa: number | null;
 }
 
@@ -76,15 +94,35 @@ export interface SessionHistoryPoint {
   /** ms since epoch */
   t: number;
   waterLevelM: number;
+  waterLevelFt: number;
   capacityPct: number;
-  distanceM: number;
+  /** Trusted / smoothed sensor-to-surface distance in millimetres. */
+  distanceMm: number;
+  trusted: boolean;
+  /** BMP280 air temperature (degC) at this sample, if published. */
+  temperatureC: number | null;
+  /** BMP280 barometric pressure (hPa) at this sample, if published. */
+  pressureHpa: number | null;
+  /** Modem battery voltage (V) at this sample, if published (~hourly). */
+  batteryVoltage: number | null;
+  /** GSM signal (raw CSQ, 0-31) at this sample, if published (~hourly). */
+  signalStrength: number | null;
 }
 
 export interface ConnectionState {
   /** Whether the browser currently has a live Firebase socket connection. */
   firebaseConnected: boolean;
-  /** Whether the device itself appears online, based on reading recency. */
+  /** Whether the device itself appears online, based on trusted-reading recency. */
   deviceConnectivity: DeviceConnectivity;
   /** Whether the browser reports it has a network connection at all. */
   browserOnline: boolean;
+}
+
+export interface MonitorQualityState {
+  quality: DataQuality;
+  faultCodes: FaultCode[];
+  message: string | null;
+  rejectRate: number;
+  longestGapMs: number;
+  liveSampleCount: number;
 }

@@ -1,7 +1,8 @@
 import { motion } from "framer-motion";
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import type { DerivedReading } from "../types";
+import { SITE_CONFIG } from "../config";
+import type { DerivedReading, MonitorQualityState } from "../types";
 import { ALERT_LEVEL_LABEL } from "../lib/waterLevel";
 import { Card } from "./ui/Card";
 import { StatCardSkeleton } from "./Skeletons";
@@ -9,6 +10,7 @@ import { StatCardSkeleton } from "./Skeletons";
 interface HeroStatsProps {
   reading: DerivedReading | null;
   loadState: "loading" | "ready" | "error";
+  quality: MonitorQualityState;
 }
 
 const ACCENT_BG: Record<string, string> = {
@@ -38,16 +40,16 @@ function StatCard({
   valueClassName?: string;
 }) {
   return (
-    <Card className="p-5">
+    <Card className="p-3.5">
       <div className="flex items-start justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           {label}
         </p>
-        <span className={clsx("flex h-9 w-9 items-center justify-center rounded-lg", ACCENT_BG[accent])}>
+        <span className={clsx("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", ACCENT_BG[accent])}>
           {icon}
         </span>
       </div>
-      <div className="mt-3 flex items-baseline gap-1.5">
+      <div className="mt-1.5 flex items-baseline gap-1.5">
         <motion.span
           key={value}
           initial={{ opacity: 0.4, y: 4 }}
@@ -62,13 +64,13 @@ function StatCard({
         </motion.span>
         {unit && <span className="text-sm font-medium text-neutral-400">{unit}</span>}
       </div>
-      {hint && <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
+      {hint && <p className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400" title={hint}>{hint}</p>}
     </Card>
   );
 }
 
-export function HeroStats({ reading, loadState }: HeroStatsProps) {
-  if (loadState === "loading" || !reading) {
+export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
+  if (loadState === "loading" || !reading || reading.isSensorFault) {
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -80,24 +82,35 @@ export function HeroStats({ reading, loadState }: HeroStatsProps) {
 
   const lastUpdatedAbsolute = formatAbsoluteTime(reading.receivedAtMs);
   const lastUpdatedRelative = formatRelativeTime(reading.receivedAtMs);
+  const qualityHint =
+    quality.quality === "good"
+      ? reading.isSmoothed
+        ? `Median of ${quality.liveSampleCount} samples · trusted`
+        : "Trusted reading"
+      : quality.message ?? "Degraded — filtered sensor noise";
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
       <StatCard
-        label="Water Depth"
-        value={reading.waterLevelM.toFixed(2)}
-        unit="m"
+        label="Water Level"
+        value={reading.waterLevelFt.toFixed(2)}
+        unit="ft"
         accent="primary"
         icon={<GaugeIcon className="h-5 w-5" />}
-        hint="Bed level to water surface"
+        hint={`${reading.waterLevelM.toFixed(2)} m · of ${SITE_CONFIG.fullCapacityFt} ft full capacity`}
       />
       <StatCard
         label="Sensor Distance"
-        value={reading.distanceM.toFixed(2)}
-        unit="m"
-        accent="neutral"
+        value={Number.isFinite(reading.distanceMm) ? Math.round(reading.distanceMm).toString() : "—"}
+        unit="mm"
+        accent={quality.quality === "good" ? "neutral" : "warning"}
         icon={<RulerIcon className="h-5 w-5" />}
-        hint="Sensor face to water surface"
+        hint={
+          Number.isFinite(reading.rawDistanceMm) &&
+          Math.round(reading.rawDistanceMm) !== Math.round(reading.distanceMm)
+            ? `Trusted median · raw ${Math.round(reading.rawDistanceMm)} mm`
+            : "A01 · sensor face to water surface"
+        }
       />
       <StatCard
         label="Capacity"
@@ -114,16 +127,18 @@ export function HeroStats({ reading, loadState }: HeroStatsProps) {
         hint={ALERT_LEVEL_LABEL[reading.alertLevel]}
       />
       <StatCard
-        label="Atmospheric Pressure"
-        value={reading.pressureHpa !== null ? reading.pressureHpa.toFixed(1) : "—"}
-        unit={reading.pressureHpa !== null ? "hPa" : undefined}
-        accent="neutral"
-        icon={<PressureIcon className="h-5 w-5" />}
+        label="Data Quality"
+        value={quality.quality === "good" ? "Good" : quality.quality === "degraded" ? "Degraded" : "Fault"}
+        accent={
+          quality.quality === "good" ? "success" : quality.quality === "degraded" ? "warning" : "critical"
+        }
+        icon={<PercentIcon className="h-5 w-5" />}
+        hint={qualityHint}
       />
       <StatCard
         label="Last Updated"
         value={lastUpdatedAbsolute}
-        accent="neutral"
+        accent={reading.isStale ? "warning" : "neutral"}
         icon={<ClockIcon className="h-5 w-5" />}
         hint={lastUpdatedRelative}
         valueClassName="text-base leading-snug tabular-nums"
@@ -189,16 +204,6 @@ function PercentIcon({ className }: { className?: string }) {
       <circle cx="7" cy="7" r="2.5" />
       <circle cx="17" cy="17" r="2.5" />
       <path d="M18 6 6 18" strokeLinecap="round" />
-    </svg>
-  );
-}
-function PressureIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
-      <path d="M12 21a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z" opacity="0" />
-      <path d="M4 13a8 8 0 1 1 16 0" strokeLinecap="round" />
-      <path d="M12 13 15 8" strokeLinecap="round" />
-      <circle cx="12" cy="13" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   );
 }
