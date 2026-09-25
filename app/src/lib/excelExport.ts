@@ -33,8 +33,6 @@ export interface SheetSpec<Row> {
   sheetName: string;
   columns: SheetColumn<Row>[];
   rows: Row[];
-  /** Lines shown above the table — provenance, filters applied, totals. */
-  notes?: string[];
 }
 
 /** Width is measured in characters, so cap it before a long note stretches a column off-screen. */
@@ -67,19 +65,11 @@ export async function buildWorkbook<Row>(spec: SheetSpec<Row>): Promise<import("
     views: [{ state: "frozen", ySplit: 0 }],
   });
 
-  // Notes sit above the table rather than in a second sheet: an operator who
-  // prints one page should still see which filters produced these rows.
-  let cursor = 1;
-  for (const note of spec.notes ?? []) {
-    const cell = sheet.getCell(cursor, 1);
-    cell.value = note;
-    cell.font = { italic: true, size: 10, color: { argb: "FF555555" } };
-    cursor++;
-  }
-  if (spec.notes?.length) cursor++; // blank spacer row
-
-  const headerRowIndex = cursor;
-  const headerRow = sheet.getRow(headerRowIndex);
+  // The table starts at row 1. Provenance lines above it were tried and
+  // removed: they pushed the header to row 8, and freezing everything above
+  // the data meant eight rows of preamble stayed pinned over every scroll.
+  const HEADER_ROW = 1;
+  const headerRow = sheet.getRow(HEADER_ROW);
   spec.columns.forEach((col, i) => {
     const cell = headerRow.getCell(i + 1);
     cell.value = col.header;
@@ -92,7 +82,7 @@ export async function buildWorkbook<Row>(spec: SheetSpec<Row>): Promise<import("
   headerRow.commit();
 
   spec.rows.forEach((row, r) => {
-    const excelRow = sheet.getRow(headerRowIndex + 1 + r);
+    const excelRow = sheet.getRow(HEADER_ROW + 1 + r);
     spec.columns.forEach((col, c) => {
       const cell = excelRow.getCell(c + 1);
       const value = col.value(row);
@@ -110,15 +100,15 @@ export async function buildWorkbook<Row>(spec: SheetSpec<Row>): Promise<import("
   });
 
   // Freeze the header and let Excel filter/sort the record in place.
-  sheet.views = [{ state: "frozen", ySplit: headerRowIndex }];
+  sheet.views = [{ state: "frozen", ySplit: HEADER_ROW }];
   if (spec.rows.length > 0) {
     sheet.autoFilter = {
-      from: { row: headerRowIndex, column: 1 },
-      to: { row: headerRowIndex + spec.rows.length, column: spec.columns.length },
+      from: { row: HEADER_ROW, column: 1 },
+      to: { row: HEADER_ROW + spec.rows.length, column: spec.columns.length },
     };
   }
 
-  sizeColumns(sheet, spec, headerRowIndex);
+  sizeColumns(sheet, spec);
 
   return workbook;
 }
@@ -131,11 +121,7 @@ export async function buildWorkbook<Row>(spec: SheetSpec<Row>): Promise<import("
  * column arrives at the 8.43-character default and any timestamp or long label
  * shows as `####`, which is exactly what makes an exported record unusable.
  */
-function sizeColumns<Row>(
-  sheet: import("exceljs").Worksheet,
-  spec: SheetSpec<Row>,
-  headerRowIndex: number,
-): void {
+function sizeColumns<Row>(sheet: import("exceljs").Worksheet, spec: SheetSpec<Row>): void {
   spec.columns.forEach((col, i) => {
     // A wrapped two-word header does not need the full width of both words.
     const headerWidth = Math.max(...col.header.split(" ").map((w) => w.length), 8);
@@ -156,10 +142,6 @@ function sizeColumns<Row>(
       Math.max(MIN_WIDTH, widest + WIDTH_PADDING),
     );
   });
-
-  // Notes are free text above the table; keep them off the first column's width
-  // by letting them overflow, which Excel does when the cell to the right is empty.
-  sheet.getRow(headerRowIndex).alignment = { wrapText: true };
 }
 
 /** Approximates how wide a number renders under a "0.000"-style format. */

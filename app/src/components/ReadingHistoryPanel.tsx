@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { SITE_CONFIG } from "../config";
-import { downloadCsv, formatIst } from "../lib/csvExport";
+import { downloadCsv } from "../lib/csvExport";
 import { downloadXlsx } from "../lib/excelExport";
 import { fetchReadingsBetween } from "../lib/firebase";
 import {
@@ -14,8 +14,7 @@ import {
   type HistoryFilters,
   type TrustedReading,
 } from "../lib/readingHistory";
-import { ALERT_LEVEL_LABEL, ALERT_LEVEL_SHORT, replayAlertLevels } from "../lib/waterLevel";
-import { ORG_INFO } from "../config";
+import { ALERT_LEVEL_SHORT, replayAlertLevels } from "../lib/waterLevel";
 import type { AlertLevel, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
 
 interface ReadingHistoryPanelProps {
@@ -448,52 +447,6 @@ function HourSelect({
 
 // ----------------------------------------------------------------- results
 
-/**
- * Provenance lines written above the exported table.
- *
- * An exported sheet outlives the screen it came from, so it has to say which
- * filters produced it and which calibration it was computed on — otherwise two
- * workbooks with different row counts, or from either side of a re-fit, are
- * indistinguishable once filed.
- */
-function exportNotes(
-  summary: ReturnType<typeof summarizeHistory>,
-  total: number,
-  filters: HistoryFilters,
-): string[] {
-  const notes = [
-    `${ORG_INFO.name} — ${ORG_INFO.projectName}`,
-    "Trusted reading history — every reading the dashboard trusts, after physical validation and jump filtering.",
-    `Exported ${formatIst(Date.now())} IST`,
-  ];
-
-  if (summary) {
-    notes.push(
-      `Period ${formatIst(summary.firstMs)} → ${formatIst(summary.lastMs)} IST · ` +
-        `${summary.count.toLocaleString()} of ${total.toLocaleString()} readings · ` +
-        `${summary.minFt.toFixed(2)}–${summary.maxFt.toFixed(2)} ft (median ${summary.medianFt.toFixed(2)} ft)`,
-    );
-  }
-
-  const active: string[] = [];
-  if (filters.alertLevels.length) {
-    active.push(`bands ${filters.alertLevels.map((l) => ALERT_LEVEL_LABEL[l]).join(", ")}`);
-  }
-  if (filters.minLevelFt !== null || filters.maxLevelFt !== null) {
-    active.push(`level ${filters.minLevelFt ?? "min"}–${filters.maxLevelFt ?? "max"} ft`);
-  }
-  if (filters.fromHour !== null || filters.toHour !== null) {
-    active.push(`hours ${filters.fromHour ?? 0}:00–${filters.toHour ?? 23}:00 IST`);
-  }
-  notes.push(active.length ? `Filters applied: ${active.join(" · ")}` : "Filters applied: none");
-  notes.push(
-    `Calibration: sensor elevation ${SITE_CONFIG.sensorElevationFt.toFixed(2)} ft · ` +
-      `full capacity ${SITE_CONFIG.fullCapacityFt} ft FRL`,
-  );
-
-  return notes;
-}
-
 function SummaryBar({
   summary,
   total,
@@ -550,7 +503,7 @@ function SummaryBar({
             try {
               await downloadXlsx(
                 `trusted-reading-history-${new Date().toISOString().slice(0, 10)}`,
-                trustedHistorySheet(rows, exportNotes(summary, total, filters)),
+                trustedHistorySheet(rows),
               );
             } finally {
               setExporting(false);

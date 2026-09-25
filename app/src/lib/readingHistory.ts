@@ -150,13 +150,9 @@ export function trustedHistoryToCsv(rows: TrustedReading[]): string {
  * sorted, totalled and charted without anyone retyping it. Kept beside the CSV
  * definition so the two cannot drift into disagreeing about what a column means.
  */
-export function trustedHistorySheet(
-  rows: TrustedReading[],
-  notes: string[] = [],
-): SheetSpec<TrustedReading> {
+export function trustedHistorySheet(rows: TrustedReading[]): SheetSpec<TrustedReading> {
   return {
     sheetName: "Trusted readings",
-    notes,
     rows,
     columns: [
       { header: "Time (IST)", value: (r) => formatIst(r.t), align: "left" },

@@ -7,7 +7,7 @@
  *   - every column is wide enough for its widest value (no `####` in Excel)
  *   - measurements are numbers, not text, so they can be sorted and totalled
  *   - headers carry units, and match the CSV column for column
- *   - the header row is frozen and filterable, below the provenance notes
+ *   - the header row is frozen and filterable, and is row 1
  *
  * Usage: npx tsx tools/excelExportCheck.ts
  */
@@ -32,12 +32,7 @@ async function main(): Promise<void> {
   const rows = buildTrustedHistory(readings);
   console.log(`=== EXCEL EXPORT CHECK === ${rows.length} trusted readings\n`);
 
-  const notes = [
-    "Meghalaya Energy Corporation Limited — Water Level Monitoring System",
-    "Trusted reading history — every reading the dashboard trusts.",
-    "Filters applied: none",
-  ];
-  const spec = trustedHistorySheet(rows, notes);
+  const spec = trustedHistorySheet(rows);
   const workbook = await buildWorkbook(spec);
   const sheet = workbook.worksheets[0];
 
@@ -47,7 +42,7 @@ async function main(): Promise<void> {
     if (!ok) failures++;
   };
 
-  const headerRowIndex = notes.length + 2;
+  const headerRowIndex = 1; // the table starts at row 1; no preamble
   const headerRow = sheet.getRow(headerRowIndex);
 
   check(
@@ -109,7 +104,7 @@ async function main(): Promise<void> {
   check(Boolean(sheet.autoFilter), "autofilter covers the table");
   check(
     sheet.rowCount === headerRowIndex + rows.length,
-    "row count = notes + header + readings",
+    "row count = header + readings",
     `${sheet.rowCount} rows`,
   );
 
