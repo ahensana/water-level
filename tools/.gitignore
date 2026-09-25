@@ -1,3 +1,6 @@
 # Raw RTDB pull used for calibration analysis - regenerate, don't commit.
 sensor-dump.json
 accuracy-report.json
+
+# Sample workbook written by excelExportCheck.ts - regenerate, don't commit.
+trusted-reading-history-sample.xlsx

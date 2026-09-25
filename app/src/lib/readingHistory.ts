@@ -1,6 +1,7 @@
 import { processMonitorPipeline } from "./sensorQuality";
-import { replayAlertLevels } from "./waterLevel";
+import { ALERT_LEVEL_LABEL, replayAlertLevels } from "./waterLevel";
 import { formatIst } from "./csvExport";
+import type { SheetSpec } from "./excelExport";
 import type { AlertLevel, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
 
 /** A trusted reading with the alert band it fell in. */
@@ -140,4 +141,39 @@ export function trustedHistoryToCsv(rows: TrustedReading[]): string {
     ].join(","),
   );
   return [CSV_COLUMNS.join(","), ...lines].join("\r\n");
+}
+
+/**
+ * The same record as `trustedHistoryToCsv`, described for Excel.
+ *
+ * Headers carry their units and values stay numeric, so a filed workbook can be
+ * sorted, totalled and charted without anyone retyping it. Kept beside the CSV
+ * definition so the two cannot drift into disagreeing about what a column means.
+ */
+export function trustedHistorySheet(
+  rows: TrustedReading[],
+  notes: string[] = [],
+): SheetSpec<TrustedReading> {
+  return {
+    sheetName: "Trusted readings",
+    notes,
+    rows,
+    columns: [
+      { header: "Time (IST)", value: (r) => formatIst(r.t), align: "left" },
+      { header: "Time (UTC)", value: (r) => new Date(r.t).toISOString(), align: "left" },
+      { header: "Air gap (mm)", value: (r) => Math.round(r.distanceMm), numFmt: "0" },
+      { header: "Water level (ft)", value: (r) => r.waterLevelFt, numFmt: "0.000" },
+      { header: "Water level (m)", value: (r) => r.waterLevelM, numFmt: "0.000" },
+      { header: "Capacity (%)", value: (r) => r.capacityPct, numFmt: "0.00" },
+      {
+        header: "Alert band",
+        value: (r) => ALERT_LEVEL_LABEL[r.alertLevel],
+        align: "center",
+      },
+      { header: "Temperature (°C)", value: (r) => r.temperatureC, numFmt: "0.0" },
+      { header: "Pressure (hPa)", value: (r) => r.pressureHpa, numFmt: "0.00" },
+      { header: "Battery (V)", value: (r) => r.batteryVoltage, numFmt: "0.00" },
+      { header: "Signal (CSQ 0-31)", value: (r) => r.signalStrength, numFmt: "0" },
+    ],
+  };
 }

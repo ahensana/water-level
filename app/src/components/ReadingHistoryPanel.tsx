@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { SITE_CONFIG } from "../config";
-import { downloadCsv } from "../lib/csvExport";
+import { downloadCsv, formatIst } from "../lib/csvExport";
+import { downloadXlsx } from "../lib/excelExport";
 import { fetchReadingsBetween } from "../lib/firebase";
 import {
   buildTrustedHistory,
@@ -8,11 +9,13 @@ import {
   filterTrustedHistory,
   isFilterActive,
   summarizeHistory,
+  trustedHistorySheet,
   trustedHistoryToCsv,
   type HistoryFilters,
   type TrustedReading,
 } from "../lib/readingHistory";
-import { ALERT_LEVEL_SHORT, replayAlertLevels } from "../lib/waterLevel";
+import { ALERT_LEVEL_LABEL, ALERT_LEVEL_SHORT, replayAlertLevels } from "../lib/waterLevel";
+import { ORG_INFO } from "../config";
 import type { AlertLevel, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
 
 interface ReadingHistoryPanelProps {
@@ -445,6 +448,52 @@ function HourSelect({
 
 // ----------------------------------------------------------------- results
 
+/**
+ * Provenance lines written above the exported table.
+ *
+ * An exported sheet outlives the screen it came from, so it has to say which
+ * filters produced it and which calibration it was computed on — otherwise two
+ * workbooks with different row counts, or from either side of a re-fit, are
+ * indistinguishable once filed.
+ */
+function exportNotes(
+  summary: ReturnType<typeof summarizeHistory>,
+  total: number,
+  filters: HistoryFilters,
+): string[] {
+  const notes = [
+    `${ORG_INFO.name} — ${ORG_INFO.projectName}`,
+    "Trusted reading history — every reading the dashboard trusts, after physical validation and jump filtering.",
+    `Exported ${formatIst(Date.now())} IST`,
+  ];
+
+  if (summary) {
+    notes.push(
+      `Period ${formatIst(summary.firstMs)} → ${formatIst(summary.lastMs)} IST · ` +
+        `${summary.count.toLocaleString()} of ${total.toLocaleString()} readings · ` +
+        `${summary.minFt.toFixed(2)}–${summary.maxFt.toFixed(2)} ft (median ${summary.medianFt.toFixed(2)} ft)`,
+    );
+  }
+
+  const active: string[] = [];
+  if (filters.alertLevels.length) {
+    active.push(`bands ${filters.alertLevels.map((l) => ALERT_LEVEL_LABEL[l]).join(", ")}`);
+  }
+  if (filters.minLevelFt !== null || filters.maxLevelFt !== null) {
+    active.push(`level ${filters.minLevelFt ?? "min"}–${filters.maxLevelFt ?? "max"} ft`);
+  }
+  if (filters.fromHour !== null || filters.toHour !== null) {
+    active.push(`hours ${filters.fromHour ?? 0}:00–${filters.toHour ?? 23}:00 IST`);
+  }
+  notes.push(active.length ? `Filters applied: ${active.join(" · ")}` : "Filters applied: none");
+  notes.push(
+    `Calibration: sensor elevation ${SITE_CONFIG.sensorElevationFt.toFixed(2)} ft · ` +
+      `full capacity ${SITE_CONFIG.fullCapacityFt} ft FRL`,
+  );
+
+  return notes;
+}
+
 function SummaryBar({
   summary,
   total,
@@ -456,6 +505,10 @@ function SummaryBar({
   filters: HistoryFilters;
   rows: TrustedReading[];
 }) {
+  // Writing the workbook is off the main thread only after ExcelJS loads, and
+  // the library is ~1 MB on a site connection, so the button says what it is doing.
+  const [exporting, setExporting] = useState(false);
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-900/60">
       <div className="text-xs text-neutral-600 dark:text-neutral-300">
@@ -488,19 +541,40 @@ function SummaryBar({
           </>
         )}
       </div>
-      <button
-        type="button"
-        disabled={rows.length === 0}
-        onClick={() =>
-          downloadCsv(
-            `trusted-reading-history-${new Date().toISOString().slice(0, 10)}`,
-            trustedHistoryToCsv(rows),
-          )
-        }
-        className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
-      >
-        Export {rows.length.toLocaleString()} rows
-      </button>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={rows.length === 0 || exporting}
+          onClick={async () => {
+            setExporting(true);
+            try {
+              await downloadXlsx(
+                `trusted-reading-history-${new Date().toISOString().slice(0, 10)}`,
+                trustedHistorySheet(rows, exportNotes(summary, total, filters)),
+              );
+            } finally {
+              setExporting(false);
+            }
+          }}
+          className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
+        >
+          {exporting ? "Preparing…" : `Export ${rows.length.toLocaleString()} rows to Excel`}
+        </button>
+        <button
+          type="button"
+          disabled={rows.length === 0}
+          onClick={() =>
+            downloadCsv(
+              `trusted-reading-history-${new Date().toISOString().slice(0, 10)}`,
+              trustedHistoryToCsv(rows),
+            )
+          }
+          title="Plain CSV, for importing into another system"
+          className="rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-400 dark:hover:bg-neutral-700"
+        >
+          CSV
+        </button>
+      </div>
     </div>
   );
 }
