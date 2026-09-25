@@ -7,18 +7,31 @@
  *   waterLevelFt = sensorElevationFt − (distanceMm / 1000) × 3.28084
  *
  * Sensor elevation is fitted as `loggedLevelFt + distanceMm × (3.28084 / 1000)`
- * against the register pages in `RealDataFromSite/`. Re-fitted 13 Aug 2026 over
- * 1-13 Aug (see tools/README.md to reproduce). Restricting to days the sensor
- * has been in its final mounted position, the implied elevation per day is:
- *   6 Aug 3212.23 · 7 Aug 3212.25 · 8 Aug 3212.17 · 9 Aug 3212.17
- *   10 Aug 3212.08 · 11 Aug 3212.13 · 12 Aug 3212.17 · 13 Aug 3212.19
- * Median 3212.16, day-to-day spread 0.17 ft. The previous 3212.21 came from a
- * 3-day fit that included the post-remount settling window and read ~0.05 ft
- * high against every subsequent day.
+ * against the register pages in `RealDataFromSite/`. Re-fitted 25 Sep 2026.
  *
- * Replaying the live pipeline against 123 logged hours from 7-13 Aug at this
- * constant gives a median error of ~0.00 ft, std 0.055 ft, all points within
- * 0.25 ft.
+ * THE SENSOR MOVED BETWEEN 1 AND 11 SEP 2026. The gauge held at ~3201.3 ft
+ * across that gap while the air gap fell from 3265 mm (1 Sep) to ~888 mm
+ * (11 Sep) — 7.4 ft of apparent rise that the register does not record. The
+ * old constant, 3212.16, therefore read ~7.4 ft high on every reading after
+ * the move; the dashboard was showing 3209 ft against a gauge reading 3202.
+ * Readings before the move are on the old datum and are excluded entirely
+ * (see `dataStartMs`), because one constant cannot serve both.
+ *
+ * The post-move fit rests on 16 Sep 2026, the only day since with a full,
+ * steady feed: 2212 readings, 18 logged hours, air gap holding 1114-1115 mm
+ * (hour-to-hour spread 0-5 mm). Its implied elevation is 3204.73 ft, spread
+ * 0.15 ft across the day. Against all 31 usable September hours the median
+ * error is 0.00 ft; across the 19 hours where the sensor itself was steady
+ * (15-minute spread ≤ 60 mm) the std is 0.26 ft and the worst 0.61 ft.
+ *
+ * THAT IS NOT A HEALTHY CALIBRATION, and no constant can fix what is wrong.
+ * Over all September hours the std is 1.14 ft and the worst 4.4 ft, because
+ * on 11, 21 and 25 Sep the sensor returned several different distances for
+ * the same water: 883/904 mm and 2820 mm within twenty minutes on 25 Sep,
+ * against ~805 mm expected. Those are false echoes, not level changes. Until
+ * the mount and aim are fixed and a full day of steady readings comes back,
+ * treat this constant as the best available, not as verified: re-fit from the
+ * next clean day (tools/README.md) rather than trusting these residuals.
  *
  * Two known residual effects, deliberately NOT corrected here:
  *  - A repeating ~36 mm (0.119 ft) daily oscillation peaking 17:00-19:00 IST
@@ -38,9 +51,10 @@ export const SITE_CONFIG = {
 
   /**
    * Elevation of the A01 sensor face on the same staff-gauge datum (ft).
-   * Median of the per-day fits above across 1-13 Aug 2026 (979.06 m).
+   * Fitted on 16 Sep 2026, the first steady day after the sensor moved
+   * (977.40 m). The pre-move value was 3212.16.
    */
-  sensorElevationFt: 3212.16,
+  sensorElevationFt: 3204.73,
 
   /** Warning band begins at this staff-gauge level (ft). */
   warningLevelFt: 3200,
@@ -72,10 +86,15 @@ export const SITE_CONFIG = {
    * the reservoir (600-1600 mm air gaps against a real ~4200 mm). Those are not
    * "noise" the fault filters can reason about — they are a different datum,
    * and letting them into the trend chart, diurnal profile or reliability
-   * calendar corrupts all three. The sensor reached its final mounted position
-   * on the evening of 4 Aug 2026.
+   * calendar corrupts all three.
+   *
+   * Moved from 5 Aug to 11 Sep 2026 when the sensor shifted (see the note on
+   * `sensorElevationFt`). The 5 Aug - 1 Sep record is good data, but it is on
+   * the old datum: displayed with the current constant it would read 7.4 ft
+   * low, inventing a reservoir collapse in the trend chart. It stays in RTDB,
+   * and re-reading it needs the old constant, not a wider window here.
    */
-  dataStartMs: Date.parse("2026-08-05T00:00:00+05:30"),
+  dataStartMs: Date.parse("2026-09-11T00:00:00+05:30"),
 
   /**
    * After this long with no trusted reading, the level is reported as
@@ -160,19 +179,27 @@ export const SITE_CONFIG = {
    * Regenerate with `npx tsx tools/pipelineCheck.ts` after any re-fit.
    */
   calibration: {
-    basis: "161 hourly staff-gauge points, 9 days (5-13 Aug 2026)",
-    /** Median app-vs-logbook error at this constant (ft). */
-    medianErrorFt: -0.013,
-    /** Std. dev. of that error (ft). */
-    residualStdFt: 0.063,
-    /** Repeating daily oscillation the logbook does not record (ft). */
+    basis: "18 hourly staff-gauge points, 16 Sep 2026 (first steady day after the sensor moved)",
+    /** Median app-vs-logbook error at this constant (ft), over 31 September hours. */
+    medianErrorFt: 0.002,
+    /** Std. dev. of that error (ft), over the 19 hours the sensor itself was steady. */
+    residualStdFt: 0.256,
+    /**
+     * Repeating daily oscillation the logbook does not record (ft). Measured
+     * on the August record; not yet re-measured since the sensor moved, as no
+     * clean multi-day feed exists after it.
+     */
     diurnalSwingFt: 0.119,
     /**
      * Worst single deviation from the register across the calibration window
-     * (ft), from `npx tsx tools/intervalReportCheck.ts`. This is the figure the
-     * `crossCheckToleranceFt` acceptance limit is set against.
+     * (ft). 0.61 ft is the worst among hours where the sensor was steady; over
+     * every September hour it is 4.4 ft, on days the sensor returned several
+     * distances for the same water. Verification against the gauge is expected
+     * to FAIL at the 0.3 ft `crossCheckToleranceFt` until the mount is fixed —
+     * that failure is the sensor's, and the tolerance should not be widened to
+     * hide it.
      */
-    worstDeviationFt: 0.16,
+    worstDeviationFt: 0.61,
   },
 
   /**

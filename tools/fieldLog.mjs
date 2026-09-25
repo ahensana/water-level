@@ -1,6 +1,7 @@
 /**
  * Manual staff-gauge logbook readings, transcribed from the site register
- * photos in RealDataFromSite/ (August 2026).
+ * photos in RealDataFromSite/ (August 2026) and app/src/realdata/
+ * (September 2026).
  *
  * Values are absolute reservoir level in FEET on the staff-gauge datum.
  * Index 0 = 1 AM ... index 23 = 12 midnight. `null` = not recorded.
@@ -87,6 +88,41 @@ export const FIELD_LOG = {
     3198.42, 3198.39, 3198.36, 3198.34, 3198.35, 3198.35,
     3198.32, 3198.32, 3198.33, 3198.35, 3198.36, 3198.37,
     3198.38, null, null, null, null, null,
+    null, null, null, null, null, null,
+  ],
+
+  // ---- September 2026, transcribed from app/src/realdata/ ----
+  // Only the days the sensor also reported on are entered here; the photos
+  // cover 1-25 Sep continuously, so any missing day can be added from them.
+  // These are the days the post-move `sensorElevationFt` is fitted against.
+  "2026-09-11": [
+    3201.40, 3201.38, 3201.35, 3201.34, 3201.33, 3201.32,
+    3201.32, 3201.32, 3201.32, 3201.31, 3201.31, 3201.31,
+    3201.32, 3201.32, 3201.32, 3201.32, 3201.32, 3201.33,
+    3201.33, 3201.33, 3201.32, 3201.30, null, null,
+  ],
+  "2026-09-15": [
+    3201.42, 3201.41, 3201.41, 3201.41, 3201.40, 3201.40,
+    3201.40, 3201.40, 3201.41, 3201.42, 3201.42, 3201.43,
+    3201.43, 3201.44, 3201.44, 3201.45, 3201.45, 3201.45,
+    3201.44, 3201.41, 3201.38, 3201.35, 3201.32, 3201.29,
+  ],
+  "2026-09-16": [
+    3201.25, 3201.22, 3201.18, 3201.14, 3201.11, 3201.08,
+    3201.07, 3201.06, 3201.05, 3201.06, 3201.06, 3201.07,
+    3201.07, 3201.08, 3201.08, 3201.08, 3201.08, 3201.07,
+    3201.06, 3201.06, 3201.05, 3201.04, 3201.02, 3200.99,
+  ],
+  "2026-09-21": [
+    3201.25, 3201.25, 3201.26, 3201.27, 3201.28, 3201.28,
+    3201.28, 3201.29, 3201.30, 3201.31, 3201.32, 3201.33,
+    3201.35, 3201.36, 3201.37, 3201.45, 3201.50, 3201.52,
+    3201.51, 3201.50, 3201.48, 3201.45, 3201.44, 3201.44,
+  ],
+  "2026-09-25": [
+    3202.03, 3202.03, 3202.03, 3202.02, 3202.02, 3202.02,
+    3202.02, 3202.02, 3202.03, 3202.05, 3202.07, 3202.09,
+    3202.09, null, null, null, null, null,
     null, null, null, null, null, null,
   ],
 };
