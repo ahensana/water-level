@@ -125,4 +125,13 @@ export interface MonitorQualityState {
   rejectRate: number;
   longestGapMs: number;
   liveSampleCount: number;
+  /**
+   * Device time of the newest reading RECEIVED, trusted or not (null if none).
+   *
+   * Distinct from `reading.receivedAtMs`, which is the newest reading the
+   * filters accepted. When the two differ the device is still uploading but its
+   * readings are being rejected — a very different fault from a node that has
+   * gone silent, and the dashboard must not show the second as the first.
+   */
+  lastRawAtMs: number | null;
 }

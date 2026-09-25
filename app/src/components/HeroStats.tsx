@@ -70,7 +70,7 @@ function StatCard({
 }
 
 export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
-  if (loadState === "loading" || !reading || reading.isSensorFault) {
+  if (loadState === "loading" || !reading) {
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -82,6 +82,29 @@ export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
 
   const lastUpdatedAbsolute = formatAbsoluteTime(reading.receivedAtMs);
   const lastUpdatedRelative = formatRelativeTime(reading.receivedAtMs);
+
+  // A reading too old to trust still answers the question operators actually
+  // ask - "what did it last say, and when?" - so it is shown rather than
+  // blanked. It must never look live, though: zone colours and the alert label
+  // are dropped, every card is badged with the age, and the pipeline has
+  // already barred a stale value from raising an alert.
+  const unavailable = reading.isSensorFault;
+  const hasLastKnown = Number.isFinite(reading.waterLevelFt) && reading.waterLevelFt > 0;
+
+  // "Last Updated" means the last reading that ARRIVED. Anchoring it to the last
+  // trusted sample instead made a device that was uploading rejected readings
+  // look like a device that had stopped uploading, which sends an engineer to
+  // check power and signal when the real fault is at the sensor.
+  const lastUploadMs = quality.lastRawAtMs;
+  const uploadsOutlastTrusted =
+    typeof lastUploadMs === "number" && lastUploadMs - reading.receivedAtMs > 60_000;
+  const lastUploadAbsolute = uploadsOutlastTrusted
+    ? formatAbsoluteTime(lastUploadMs as number)
+    : lastUpdatedAbsolute;
+  const staleHint = hasLastKnown
+    ? `Last trusted reading · ${lastUpdatedRelative}`
+    : "No trusted reading in the loaded history";
+
   const qualityHint =
     quality.quality === "good"
       ? reading.isSmoothed
@@ -91,13 +114,23 @@ export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      {unavailable && (
+        <p className="col-span-2 -mb-1 text-xs font-semibold text-warning-600 dark:text-warning-500 lg:col-span-5">
+          Not current — {hasLastKnown ? "last trusted reading" : "no trusted reading"} shown below,{" "}
+          {lastUpdatedAbsolute} ({lastUpdatedRelative}).
+        </p>
+      )}
       <StatCard
         label="Water Level"
-        value={reading.waterLevelFt.toFixed(2)}
+        value={unavailable && !hasLastKnown ? "—" : reading.waterLevelFt.toFixed(2)}
         unit="ft"
-        accent="primary"
+        accent={unavailable ? "neutral" : "primary"}
         icon={<GaugeIcon className="h-5 w-5" />}
-        hint={`${reading.waterLevelM.toFixed(2)} m · of ${SITE_CONFIG.fullCapacityFt} ft full capacity`}
+        hint={
+          unavailable
+            ? staleHint
+            : `${reading.waterLevelM.toFixed(2)} m · of ${SITE_CONFIG.fullCapacityFt} ft full capacity`
+        }
       />
       <StatCard
         label="Sensor Distance"
@@ -106,25 +139,32 @@ export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
         accent={quality.quality === "good" ? "neutral" : "warning"}
         icon={<RulerIcon className="h-5 w-5" />}
         hint={
-          Number.isFinite(reading.rawDistanceMm) &&
-          Math.round(reading.rawDistanceMm) !== Math.round(reading.distanceMm)
-            ? `Trusted median · raw ${Math.round(reading.rawDistanceMm)} mm`
-            : "A01 · sensor face to water surface"
+          unavailable
+            ? Number.isFinite(reading.rawDistanceMm) &&
+              Math.round(reading.rawDistanceMm) !== Math.round(reading.distanceMm)
+              ? `${staleHint} · raw ${Math.round(reading.rawDistanceMm)} mm`
+              : staleHint
+            : Number.isFinite(reading.rawDistanceMm) &&
+                Math.round(reading.rawDistanceMm) !== Math.round(reading.distanceMm)
+              ? `Trusted median · raw ${Math.round(reading.rawDistanceMm)} mm`
+              : "A01 · sensor face to water surface"
         }
       />
       <StatCard
         label="Capacity"
-        value={reading.capacityPct.toFixed(1)}
+        value={unavailable && !hasLastKnown ? "—" : reading.capacityPct.toFixed(1)}
         unit="%"
         accent={
-          reading.alertLevel === "critical"
-            ? "critical"
-            : reading.alertLevel === "warning"
-              ? "warning"
-              : "success"
+          unavailable
+            ? "neutral"
+            : reading.alertLevel === "critical"
+              ? "critical"
+              : reading.alertLevel === "warning"
+                ? "warning"
+                : "success"
         }
         icon={<PercentIcon className="h-5 w-5" />}
-        hint={ALERT_LEVEL_LABEL[reading.alertLevel]}
+        hint={unavailable ? staleHint : ALERT_LEVEL_LABEL[reading.alertLevel]}
       />
       <StatCard
         label="Data Quality"
@@ -137,10 +177,14 @@ export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
       />
       <StatCard
         label="Last Updated"
-        value={lastUpdatedAbsolute}
-        accent={reading.isStale ? "warning" : "neutral"}
+        value={lastUploadAbsolute}
+        accent={unavailable ? "critical" : reading.isStale ? "warning" : "neutral"}
         icon={<ClockIcon className="h-5 w-5" />}
-        hint={lastUpdatedRelative}
+        hint={
+          uploadsOutlastTrusted
+            ? `${formatRelativeTime(quality.lastRawAtMs as number)} · last TRUSTED ${lastUpdatedAbsolute}`
+            : lastUpdatedRelative
+        }
         valueClassName="text-base leading-snug tabular-nums"
       />
     </div>

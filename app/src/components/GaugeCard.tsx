@@ -28,14 +28,19 @@ const ZONE_COLORS = {
 };
 
 export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
-  if (loadState === "loading" || !reading || reading.isSensorFault) {
+  if (loadState === "loading" || !reading) {
     return <GaugeSkeleton />;
   }
+
+  // Too old to trust: draw the last known level in grey with no zone highlight,
+  // so it reads as a record of the last reading rather than the level now.
+  const unavailable = reading.isSensorFault;
+  const hasLastKnown = Number.isFinite(reading.waterLevelFt) && reading.waterLevelFt > 0;
 
   const pct = reading.capacityPct;
   const valueArcLength = (pct / 100) * ARC_LENGTH;
   const trackDashArray = `${ARC_LENGTH} ${CIRCUMFERENCE}`;
-  const color = ZONE_COLORS[reading.alertLevel];
+  const color = unavailable ? "#9ca3af" : ZONE_COLORS[reading.alertLevel];
 
   const warningPct = levelToCapacityPct(SITE_CONFIG.warningLevelFt);
   const criticalPct = levelToCapacityPct(SITE_CONFIG.criticalLevelFt);
@@ -44,11 +49,17 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
     <Card>
       <CardHeader>
         <CardTitle>Real-Time Water Level</CardTitle>
-        <StatusBadge
-          level={reading.alertLevel}
-          label={ALERT_LEVEL_LABEL[reading.alertLevel]}
-          pulse={connection.deviceConnectivity === "online"}
-        />
+        {unavailable ? (
+          <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+            Not current
+          </span>
+        ) : (
+          <StatusBadge
+            level={reading.alertLevel}
+            label={ALERT_LEVEL_LABEL[reading.alertLevel]}
+            pulse={connection.deviceConnectivity === "online"}
+          />
+        )}
       </CardHeader>
       <CardBody className="flex flex-col items-center gap-4 lg:flex-row lg:items-center lg:justify-around">
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
@@ -111,17 +122,23 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
               animate={{ opacity: 1 }}
               className="text-3xl font-extrabold tabular-nums text-neutral-900 dark:text-white"
             >
-              {pct.toFixed(1)}%
+              {unavailable && !hasLastKnown ? "—" : `${pct.toFixed(1)}%`}
             </motion.span>
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
               of {SITE_CONFIG.fullCapacityFt} ft FRL
             </span>
             <span className="mt-1.5 text-base font-semibold tabular-nums text-neutral-700 dark:text-neutral-200">
-              {reading.waterLevelFt.toFixed(2)} ft
+              {unavailable && !hasLastKnown ? "—" : `${reading.waterLevelFt.toFixed(2)} ft`}
             </span>
             <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
-              {reading.waterLevelM.toFixed(2)} m
+              {unavailable && !hasLastKnown ? "" : `${reading.waterLevelM.toFixed(2)} m`}
             </span>
+            {unavailable && (
+              <span className="mt-1 px-2 text-center text-xs font-medium text-warning-600 dark:text-warning-500">
+                {hasLastKnown ? "Last trusted reading" : "No trusted reading"} ·{" "}
+                {formatLastTrusted(reading.receivedAtMs)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -135,19 +152,19 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
                 color={ZONE_COLORS.normal}
                 label="Safe Zone"
                 range={`Below ${SITE_CONFIG.warningLevelFt} ft`}
-                active={reading.alertLevel === "normal"}
+                active={!unavailable && reading.alertLevel === "normal"}
               />
               <ZoneRow
                 color={ZONE_COLORS.warning}
                 label="Warning Zone"
                 range={`${SITE_CONFIG.warningLevelFt} – ${SITE_CONFIG.criticalLevelFt} ft`}
-                active={reading.alertLevel === "warning"}
+                active={!unavailable && reading.alertLevel === "warning"}
               />
               <ZoneRow
                 color={ZONE_COLORS.critical}
                 label="Critical Zone"
                 range={`${SITE_CONFIG.criticalLevelFt} – ${SITE_CONFIG.fullCapacityFt} ft FRL`}
-                active={reading.alertLevel === "critical"}
+                active={!unavailable && reading.alertLevel === "critical"}
               />
             </div>
           </div>
@@ -155,6 +172,28 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
       </CardBody>
     </Card>
   );
+}
+
+/** "25 Sep, 14:56 (1h 20m ago)" — the age matters as much as the clock time here. */
+function formatLastTrusted(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "no timestamp";
+
+  const absolute = new Date(ms).toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const diffMin = Math.max(0, Math.floor((Date.now() - ms) / 60000));
+  const age =
+    diffMin < 60
+      ? `${diffMin}m ago`
+      : diffMin < 1440
+        ? `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`
+        : `${Math.floor(diffMin / 1440)}d ago`;
+
+  return `${absolute} (${age})`;
 }
 
 function ZoneRow({

@@ -34,6 +34,8 @@ export interface QualityReport {
   longestGapMs: number;
   /** Trusted points used for the live median. */
   liveSampleCount: number;
+  /** Device time of the newest reading received, trusted or not (null if none). */
+  lastRawAtMs: number | null;
 }
 
 export interface PipelineResult {
@@ -193,9 +195,26 @@ export function processMonitorPipeline(
 
   const liveWindowStart = now - SITE_CONFIG.liveSampleWindowMs;
   const liveSamples = trusted.filter((c) => c.t >= liveWindowStart);
-  // If clock skew puts device time ahead/behind, fall back to last N trusted.
+
+  /*
+   * If clock skew puts device time ahead/behind, fall back to the last N
+   * trusted samples — but only those close in time to the newest one.
+   *
+   * Without that restriction the fallback silently blends whatever survives the
+   * filters, however old. On 25 Sep, with 98% of readings rejected as false
+   * echo, the pool was three samples from 21 Sep plus two from the 25th, and
+   * the gauge showed their median (1319 mm) stamped with the newest sample's
+   * time — a four-day-old blend presented as one reading. A median only means
+   * something across samples of the same moment, so anything older than the
+   * unavailable threshold is dropped and the newest trusted reading stands on
+   * its own.
+   */
+  const fallbackPool = trusted.slice(-SITE_CONFIG.medianWindow);
+  const newestTrustedT = fallbackPool.length ? fallbackPool[fallbackPool.length - 1].t : 0;
   const samplesForLive =
-    liveSamples.length >= 3 ? liveSamples : trusted.slice(-SITE_CONFIG.medianWindow);
+    liveSamples.length >= 3
+      ? liveSamples
+      : fallbackPool.filter((c) => newestTrustedT - c.t <= SITE_CONFIG.readingFaultAfterMs);
 
   let reading: DerivedReading | null = null;
   if (samplesForLive.length > 0) {
@@ -284,6 +303,7 @@ export function processMonitorPipeline(
       rejectRate,
       longestGapMs,
       liveSampleCount: samplesForLive.length,
+      lastRawAtMs: deduped.length ? deduped[deduped.length - 1].t : null,
     },
   };
 }
