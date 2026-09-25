@@ -62,6 +62,7 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
         )}
       </CardHeader>
       <CardBody className="flex flex-col items-center gap-4 lg:flex-row lg:items-center lg:justify-around">
+        <div className="flex flex-col items-center">
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
           <svg
             width={SIZE}
@@ -133,13 +134,15 @@ export function GaugeCard({ reading, connection, loadState }: GaugeCardProps) {
             <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
               {unavailable && !hasLastKnown ? "" : `${reading.waterLevelM.toFixed(2)} m`}
             </span>
-            {unavailable && (
-              <span className="mt-1 px-2 text-center text-xs font-medium text-warning-600 dark:text-warning-500">
-                {hasLastKnown ? "Last trusted reading" : "No trusted reading"} ·{" "}
-                {formatLastTrusted(reading.receivedAtMs)}
-              </span>
-            )}
           </div>
+        </div>
+        {/* Below the dial, not inside it: at 208px the caption overlapped the arc. */}
+        {unavailable && (
+          <p className="mt-2 max-w-64 text-center text-xs font-medium leading-snug text-warning-600 dark:text-warning-500">
+            {hasLastKnown ? "Last trusted reading" : "No trusted reading"} ·{" "}
+            {formatLastTrusted(reading.receivedAtMs)}
+          </p>
+        )}
         </div>
 
         <div className="flex w-full flex-col gap-3 sm:max-w-sm">
