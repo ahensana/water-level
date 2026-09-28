@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { SITE_CONFIG } from "../config";
 import { downloadCsv } from "../lib/csvExport";
 import { downloadXlsx } from "../lib/excelExport";
@@ -45,7 +45,6 @@ const PRESETS = [
  * user who asks for the whole record should get it, told how much is coming.
  */
 const LARGE_RANGE_MS = 31 * 86_400_000;
-const PAGE_SIZE = 300;
 const BANDS: AlertLevel[] = ["normal", "warning", "critical"];
 
 export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHistoryPanelProps) {
@@ -57,7 +56,6 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
   const [error, setError] = useState<string | null>(null);
   const [fetched, setFetched] = useState<RawWaterMonitorReading[] | null>(null);
   const [filters, setFilters] = useState<HistoryFilters>(DEFAULT_FILTERS);
-  const [visible, setVisible] = useState(PAGE_SIZE);
   const [loadNote, setLoadNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,7 +92,6 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
     try {
       const data = await fetchReadingsBetween(SITE_CONFIG.firebaseDataPath, fromMs, toMs);
       setFetched(data);
-      setVisible(PAGE_SIZE);
       setStatus("ready");
       setLoadNote(null);
     } catch (e) {
@@ -110,6 +107,23 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
     void load(from, to);
   };
 
+  /**
+   * Drop the loaded period and go back to the session's own history.
+   *
+   * Filters are deliberately left alone: they have their own Clear, and a
+   * button that silently reset both would undo work the operator did not ask
+   * to undo.
+   */
+  const clearPeriod = () => {
+    setFetched(null);
+    setStatus("session");
+    setError(null);
+    setLoadNote(null);
+    const now = Date.now();
+    setFromLocal(toLocalInput(now - 24 * 3600_000));
+    setToLocal(toLocalInput(now));
+  };
+
   // Until a range is pulled, browse what the dashboard already holds — the panel
   // is useful the instant it opens rather than after a round trip.
   const allRows = useMemo<TrustedReading[]>(() => {
@@ -120,12 +134,7 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
   const rows = useMemo(() => filterTrustedHistory(allRows, filters), [allRows, filters]);
   const summary = useMemo(() => summarizeHistory(rows), [rows]);
 
-  // Narrowing the result set should return the operator to the top of the list
-  // rather than leaving them paged deep into rows that no longer exist.
-  const changeFilters = (next: HistoryFilters) => {
-    setFilters(next);
-    setVisible(PAGE_SIZE);
-  };
+  const changeFilters = (next: HistoryFilters) => setFilters(next);
 
   if (!open) return null;
 
@@ -172,6 +181,7 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
             onToChange={setToLocal}
             onRunRange={runRange}
             onRun={() => void load(fromLocalToMs(fromLocal), fromLocalToMs(toLocal))}
+            onClear={clearPeriod}
             busy={status === "loading"}
             usingSession={!fetched}
           />
@@ -191,7 +201,7 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
           ) : (
             <>
               <SummaryBar summary={summary} total={allRows.length} filters={filters} rows={rows} />
-              <HistoryTable rows={rows} visible={visible} onShowMore={() => setVisible((v) => v + PAGE_SIZE)} />
+              <HistoryTable key={`${rows.length}:${rows[0]?.t ?? 0}`} rows={rows} />
             </>
           )}
         </div>
@@ -219,6 +229,7 @@ function PeriodPicker({
   onToChange,
   onRunRange,
   onRun,
+  onClear,
   busy,
   usingSession,
 }: {
@@ -228,6 +239,7 @@ function PeriodPicker({
   onToChange: (v: string) => void;
   onRunRange: (from: number, to: number) => void;
   onRun: () => void;
+  onClear: () => void;
   busy: boolean;
   usingSession: boolean;
 }) {
@@ -298,6 +310,19 @@ function PeriodPicker({
         >
           {busy ? "Loading…" : "Load period"}
         </button>
+        {!usingSession && (
+          <button
+            type="button"
+            onClick={() => {
+              setDay("");
+              onClear();
+            }}
+            disabled={busy}
+            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {usingSession && (
@@ -556,15 +581,51 @@ function SummaryBar({
   );
 }
 
-function HistoryTable({
-  rows,
-  visible,
-  onShowMore,
-}: {
-  rows: TrustedReading[];
-  visible: number;
-  onShowMore: () => void;
-}) {
+/**
+ * Every filtered reading is in the table, but only the rows near the viewport
+ * are mounted.
+ *
+ * The table used to page 300 rows at a time behind a "Show more" button, which
+ * made "how many readings were below 3200 ft in August" a clicking exercise.
+ * Mounting them all instead is not an option either: a month at 30-second
+ * cadence is ~89,000 rows, and eleven cells each is enough DOM to freeze the
+ * tab. Windowing gives the honest answer — the scrollbar spans the whole
+ * record — at the cost of every row having the same height, which is why the
+ * cells below are single-line.
+ */
+const ROW_HEIGHT_PX = 30; // first-paint estimate; the real height is measured
+const VIEWPORT_PX = 448; // matches the h-[28rem] container
+const OVERSCAN_ROWS = 12;
+
+function HistoryTable({ rows }: { rows: TrustedReading[] }) {
+  // Scroll position is this component's only state, and the caller keys it on
+  // the filtered set: narrowing a filter remounts the table at the top rather
+  // than leaving the view parked in rows that no longer exist.
+  const [scrollTop, setScrollTop] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Row height is measured from the first rendered row, not assumed.
+   *
+   * The spacer rows above and below the window are sized in pixels, so if the
+   * assumed height is off by even a pixel the error compounds — a few hundred
+   * rows in, the scrollbar and the rows disagree and the last readings become
+   * unreachable. Cell padding, the row border and the browser's font settings
+   * all move that number, so it is read from the DOM once and corrected if the
+   * page is zoomed. The constant is only the first-paint estimate.
+   */
+  const [rowHeightPx, setRowHeightPx] = useState(ROW_HEIGHT_PX);
+  const measureRow = useCallback((el: HTMLTableRowElement | null) => {
+    if (!el) return;
+    const measured = el.getBoundingClientRect().height;
+    if (measured > 0) {
+      setRowHeightPx((prev) => (Math.abs(prev - measured) > 0.5 ? measured : prev));
+    }
+  }, []);
+
+  // The container height is fixed below, so the viewport needs no measuring.
+  const viewportPx = VIEWPORT_PX;
+
   if (rows.length === 0) {
     return (
       <p className="rounded-lg bg-neutral-50 px-3 py-8 text-center text-sm text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400">
@@ -573,9 +634,21 @@ function HistoryTable({
     );
   }
 
+  const firstRow = Math.max(0, Math.floor(scrollTop / rowHeightPx) - OVERSCAN_ROWS);
+  const lastRow = Math.min(
+    rows.length,
+    firstRow + Math.ceil(viewportPx / rowHeightPx) + OVERSCAN_ROWS * 2,
+  );
+  const padTopPx = firstRow * rowHeightPx;
+  const padBottomPx = (rows.length - lastRow) * rowHeightPx;
+
   return (
     <>
-      <div className="max-h-[28rem] overflow-auto rounded-lg border border-neutral-200 dark:border-neutral-700">
+      <div
+        ref={scrollRef}
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        className="h-[28rem] overflow-auto rounded-lg border border-neutral-200 dark:border-neutral-700"
+      >
         <table className="w-full text-left text-xs">
           <thead className="sticky top-0 bg-neutral-50 text-neutral-500 dark:bg-neutral-900 dark:text-neutral-400">
             <tr>
@@ -591,8 +664,13 @@ function HistoryTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100 dark:divide-neutral-700">
-            {rows.slice(0, visible).map((r) => (
-              <tr key={r.t} className="hover:bg-neutral-50 dark:hover:bg-neutral-700/40">
+            {padTopPx > 0 && <tr style={{ height: padTopPx }} aria-hidden="true" />}
+            {rows.slice(firstRow, lastRow).map((r, i) => (
+              <tr
+                key={r.t}
+                ref={i === 0 ? measureRow : undefined}
+                className="whitespace-nowrap hover:bg-neutral-50 dark:hover:bg-neutral-700/40"
+              >
                 <Td>{formatStamp(r.t, true)}</Td>
                 <Td right>{Math.round(r.distanceMm)} mm</Td>
                 <Td right strong>
@@ -608,21 +686,13 @@ function HistoryTable({
                 <Td right>{r.signalStrength === null ? "—" : `${r.signalStrength}/31`}</Td>
               </tr>
             ))}
+            {padBottomPx > 0 && <tr style={{ height: padBottomPx }} aria-hidden="true" />}
           </tbody>
         </table>
       </div>
-      {rows.length > visible && (
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={onShowMore}
-            className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
-          >
-            Show {Math.min(PAGE_SIZE, rows.length - visible).toLocaleString()} more (
-            {(rows.length - visible).toLocaleString()} remaining)
-          </button>
-        </div>
-      )}
+      <p className="text-center text-xs text-neutral-500 dark:text-neutral-400">
+        Showing all {rows.length.toLocaleString()} rows — scroll the table
+      </p>
     </>
   );
 }
