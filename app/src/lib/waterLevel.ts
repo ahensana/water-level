@@ -1,4 +1,4 @@
-import { SITE_CONFIG } from "../config";
+import { CALIBRATION_EPOCHS, SITE_CONFIG } from "../config";
 import { getCalibrationOffsetFt } from "./calibration";
 import type { AlertLevel, RawWaterMonitorReading } from "../types";
 
@@ -15,8 +15,33 @@ const MM_TO_FT = METERS_TO_FEET / 1000;
  * trim here rather than threading it through each caller is deliberate: a level
  * that is corrected in one view and not another is worse than no correction.
  */
-export function distanceToWaterLevelFt(distanceMm: number): number {
-  return effectiveSensorElevationFt() - distanceMm * MM_TO_FT;
+export function distanceToWaterLevelFt(distanceMm: number, atMs?: number): number {
+  return sensorElevationAtFt(atMs) + getCalibrationOffsetFt() - distanceMm * MM_TO_FT;
+}
+
+/**
+ * The sensor elevation that was true at a given instant (ft), before any trim.
+ *
+ * Pass the reading's own timestamp whenever converting stored data: the mount
+ * has moved twice, so August readings and today's are on different datums and
+ * converting both with the current constant puts one of them ~7 ft out. Called
+ * without a timestamp it returns the current elevation, which is what live
+ * readings and axis bounds want.
+ *
+ * A reading older than the first epoch is converted with the first epoch's
+ * constant rather than refused. Such readings are pre-commissioning and are
+ * already excluded by `dataStartMs`; if one does appear, being a few feet out
+ * on an unmounted sensor is better than a NaN propagating into the chart.
+ */
+export function sensorElevationAtFt(atMs?: number): number {
+  if (atMs === undefined || !Number.isFinite(atMs)) return SITE_CONFIG.sensorElevationFt;
+
+  let elevation: number = CALIBRATION_EPOCHS[0].elevationFt;
+  for (const epoch of CALIBRATION_EPOCHS) {
+    if (atMs >= epoch.fromMs) elevation = epoch.elevationFt;
+    else break;
+  }
+  return elevation;
 }
 
 /**

@@ -72,9 +72,13 @@ export const SITE_CONFIG = {
   fullCapacityFt: 3220,
 
   /**
-   * Elevation of the A01 sensor face on the same staff-gauge datum (ft).
-   * Fitted 28 Sep 2026 (978.71 m). Earlier fits: 3204.73 (16 Sep),
-   * 3212.16 (Aug) — see the note above on the mount not holding.
+   * Elevation of the A01 sensor face on the same staff-gauge datum (ft), as
+   * fitted for the CURRENT mount position (28 Sep 2026, 978.71 m).
+   *
+   * Use this only for "what is the sensor set to now" — the QA card, the
+   * report header, the trend chart's axis. Converting a stored reading goes
+   * through `distanceToWaterLevelFt(mm, atMs)`, which picks the elevation that
+   * was true when the reading was taken: see CALIBRATION_EPOCHS below.
    */
   sensorElevationFt: 3209.04,
 
@@ -110,16 +114,16 @@ export const SITE_CONFIG = {
    * and letting them into the trend chart, diurnal profile or reliability
    * calendar corrupts all three.
    *
-   * Moved to 28 Sep 2026, the current mount position. Everything before it
-   * is good data on an earlier datum — 11-25 Sep would read 4.3 ft high under
-   * the present constant, August 7.4 ft low — so it is cut rather than shown
-   * wrong. It stays in RTDB; reading it back needs that period's constant.
+   * Back to 5 Aug 2026, the whole commissioned record. It was cut forward
+   * twice while a single constant had to serve every reading; now that each
+   * period carries its own (CALIBRATION_EPOCHS), August displays on the
+   * August datum and today on today's, so nothing needs discarding.
    *
-   * Cutting the record on every re-fit is the cost of a single constant, and
-   * it is now the third cut. Dated calibration epochs would keep the whole
-   * series displayable; see the note on `sensorElevationFt`.
+   * What stays excluded is genuinely different: bench testing before the
+   * sensor was first mounted, when it was pointed at something other than the
+   * reservoir. There is no elevation that makes those readings mean anything.
    */
-  dataStartMs: Date.parse("2026-09-28T00:00:00+05:30"),
+  dataStartMs: Date.parse("2026-08-05T00:00:00+05:30"),
 
   /**
    * After this long with no trusted reading, the level is reported as
@@ -239,6 +243,44 @@ export const SITE_CONFIG = {
    */
   crossCheckToleranceFt: 0.3,
 } as const;
+
+/**
+ * Sensor elevation by period — the datum each stored reading was taken on.
+ *
+ * The mount has moved twice (see the note at the top of this file), and a
+ * reading is only meaningful against the elevation that was true when it was
+ * recorded. With a single constant the only honest option was to cut the
+ * record at every re-fit, which threw away August to show September. Each
+ * period keeps its own constant instead, so the whole series displays
+ * correctly and a re-fit stops destroying history.
+ *
+ * Entries are ordered oldest first, and each applies from `fromMs` until the
+ * next one begins. Boundaries are placed inside the outages that separate the
+ * periods — the sensor was silent 1-11 Sep and 25-28 Sep — so no reading sits
+ * near a boundary where the wrong constant might be picked.
+ *
+ * Adding an epoch: fit against the register (tools/README.md), append the
+ * entry, and update `sensorElevationFt` above to the new value. Do not edit a
+ * past entry unless its own fit was wrong; changing it rewrites history that
+ * has already been exported and filed.
+ */
+export const CALIBRATION_EPOCHS = [
+  {
+    fromMs: Date.parse("2026-08-05T00:00:00+05:30"),
+    elevationFt: 3212.16,
+    note: "Original mount. Fitted over 9 steady days, 5-13 Aug; day-to-day spread 0.17 ft.",
+  },
+  {
+    fromMs: Date.parse("2026-09-11T00:00:00+05:30"),
+    elevationFt: 3204.73,
+    note: "After the first move. Fitted on 16 Sep, the only steady day in the period.",
+  },
+  {
+    fromMs: Date.parse("2026-09-26T00:00:00+05:30"),
+    elevationFt: 3209.04,
+    note: "After the second move. Fitted on 84 readings, 14:00-14:38 IST on 28 Sep.",
+  },
+] as const;
 
 export const ORG_INFO = {
   name: "Meghalaya Energy Corporation Limited",

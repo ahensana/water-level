@@ -152,7 +152,7 @@ export function buildIntervalReport(
     if (s.fault) faultCounts[s.fault] = (faultCounts[s.fault] ?? 0) + 1;
   }
 
-  const levels = valid.map((s) => distanceToWaterLevelFt(s.mm));
+  const levels = valid.map((s) => distanceToWaterLevelFt(s.mm, s.t));
   const expected = Math.max(1, Math.round((toMs - fromMs) / ANALYTICS_CONFIG.expectedSampleIntervalMs));
 
   const gaps: { fromMs: number; toMs: number }[] = [];
@@ -178,7 +178,7 @@ export function buildIntervalReport(
       const ok = list.filter((s) => s.fault === null);
       const mms = ok.map((s) => s.mm);
       const distance = mms.length ? median(mms) : null;
-      const levelFt = distance === null ? null : distanceToWaterLevelFt(distance);
+      const levelFt = distance === null ? null : distanceToWaterLevelFt(distance, startMs);
       const temps = ok.map((s) => s.tempC).filter(isNum);
       return {
         startMs,

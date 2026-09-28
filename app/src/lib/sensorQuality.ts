@@ -156,7 +156,7 @@ export function processMonitorPipeline(
 
   const history: SessionHistoryPoint[] = smoothed.map((c) => {
     const waterLevelFt = clamp(
-      distanceToWaterLevelFt(c.distanceMm),
+      distanceToWaterLevelFt(c.distanceMm, c.t),
       0,
       SITE_CONFIG.fullCapacityFt,
     );
@@ -221,7 +221,7 @@ export function processMonitorPipeline(
     const medianMm = median(samplesForLive.map((c) => c.distanceMm));
     const anchor = samplesForLive[samplesForLive.length - 1];
     const waterLevelFt = clamp(
-      distanceToWaterLevelFt(medianMm),
+      distanceToWaterLevelFt(medianMm, anchor.t),
       0,
       SITE_CONFIG.fullCapacityFt,
     );
