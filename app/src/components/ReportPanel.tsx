@@ -37,10 +37,13 @@ const PRESETS = [
   { label: "Last 3 days", ms: 3 * 86_400_000 },
   { label: "Last 7 days", ms: 7 * 86_400_000 },
   { label: "Last 30 days", ms: 30 * 86_400_000 },
+  { label: "Last 90 days", ms: 90 * 86_400_000 },
+  /** Everything on record; the start is clamped to `dataStartMs` on load. */
+  { label: "All data", ms: Number.POSITIVE_INFINITY },
 ] as const;
 
-/** Beyond this a single pull gets heavy enough to hurt on a site connection. */
-const MAX_RANGE_MS = 31 * 86_400_000;
+/** Beyond this a single pull is announced, not refused — see ReadingHistoryPanel. */
+const LARGE_RANGE_MS = 31 * 86_400_000;
 
 /**
  * Rows rendered at once. At 30-second cadence a month of raw readings is ~89,000
@@ -57,6 +60,7 @@ export function ReportPanel({ open, onClose }: ReportPanelProps) {
   const [toLocal, setToLocal] = useState(() => toLocalInput(Date.now()));
   const [bucketMs, setBucketMs] = useState<number>(3_600_000);
   const [status, setStatus] = useState<Status>("idle");
+  const [loadNote, setLoadNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readings, setReadings] = useState<RawWaterMonitorReading[]>([]);
   const [loadedRange, setLoadedRange] = useState<{ from: number; to: number } | null>(null);
@@ -70,26 +74,36 @@ export function ReportPanel({ open, onClose }: ReportPanelProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const load = useCallback(async (fromMs: number, toMs: number) => {
-    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+  const load = useCallback(async (requestedFromMs: number, requestedToMs: number) => {
+    if (!Number.isFinite(requestedFromMs) || !Number.isFinite(requestedToMs)) {
+      setStatus("error");
+      setError("Enter a start and end time.");
+      return;
+    }
+    // Nothing exists outside the record, so asking for it only slows the query.
+    const fromMs = Math.max(requestedFromMs, SITE_CONFIG.dataStartMs);
+    const toMs = Math.min(requestedToMs, Date.now());
+    if (toMs <= fromMs) {
       setStatus("error");
       setError("End time must be after the start time.");
       return;
     }
-    if (toMs - fromMs > MAX_RANGE_MS) {
-      setStatus("error");
-      setError(`Range is limited to ${MAX_RANGE_MS / 86_400_000} days per report.`);
-      return;
-    }
     setStatus("loading");
     setError(null);
+    setLoadNote(
+      toMs - fromMs > LARGE_RANGE_MS
+        ? `Loading ${Math.round((toMs - fromMs) / 86_400_000)} days — a long period can take a while on a site connection.`
+        : null,
+    );
     try {
       const data = await fetchReadingsBetween(SITE_CONFIG.firebaseDataPath, fromMs, toMs);
       setReadings(data);
       setLoadedRange({ from: fromMs, to: toMs });
       setStatus("ready");
+      setLoadNote(null);
     } catch (e) {
       setStatus("error");
+      setLoadNote(null);
       setError(e instanceof Error ? e.message : "Could not load readings for that period.");
     }
   }, []);
@@ -169,7 +183,7 @@ export function ReportPanel({ open, onClose }: ReportPanelProps) {
 
           {status === "loading" && (
             <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-              Loading readings for the selected period…
+              {loadNote ?? "Loading readings for the selected period…"}
             </p>
           )}
 
@@ -230,7 +244,8 @@ function RangePicker({
             onClick={() => {
               setDay("");
               const to = Date.now();
-              onRunRange(to - p.ms, to);
+              // "All data" is Infinity; load() clamps the start to dataStartMs.
+              onRunRange(Number.isFinite(p.ms) ? to - p.ms : SITE_CONFIG.dataStartMs, to);
             }}
             className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
           >

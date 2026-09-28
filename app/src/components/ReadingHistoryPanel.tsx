@@ -31,9 +31,20 @@ const PRESETS = [
   { label: "Last 3 days", ms: 3 * 86_400_000 },
   { label: "Last 7 days", ms: 7 * 86_400_000 },
   { label: "Last 30 days", ms: 30 * 86_400_000 },
+  { label: "Last 90 days", ms: 90 * 86_400_000 },
+  /** Everything on record: the fetch is clamped to `dataStartMs` below. */
+  { label: "All data", ms: Number.POSITIVE_INFINITY },
 ] as const;
 
-const MAX_RANGE_MS = 31 * 86_400_000;
+/**
+ * Beyond this, the load is announced rather than refused.
+ *
+ * There was a hard 31-day cap here, which made a year of filed readings
+ * unreachable from the one view built to browse them. The range query is by
+ * push key, so a long period costs bandwidth and time, not correctness — and a
+ * user who asks for the whole record should get it, told how much is coming.
+ */
+const LARGE_RANGE_MS = 31 * 86_400_000;
 const PAGE_SIZE = 300;
 const BANDS: AlertLevel[] = ["normal", "warning", "critical"];
 
@@ -47,6 +58,7 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
   const [fetched, setFetched] = useState<RawWaterMonitorReading[] | null>(null);
   const [filters, setFilters] = useState<HistoryFilters>(DEFAULT_FILTERS);
   const [visible, setVisible] = useState(PAGE_SIZE);
+  const [loadNote, setLoadNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -57,26 +69,37 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const load = useCallback(async (fromMs: number, toMs: number) => {
-    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+  const load = useCallback(async (requestedFromMs: number, requestedToMs: number) => {
+    if (!Number.isFinite(requestedFromMs) || !Number.isFinite(requestedToMs)) {
+      setStatus("error");
+      setError("Enter a start and end time.");
+      return;
+    }
+    // Nothing exists before the record starts or after now, so asking for it
+    // only costs a slower query.
+    const fromMs = Math.max(requestedFromMs, SITE_CONFIG.dataStartMs);
+    const toMs = Math.min(requestedToMs, Date.now());
+    if (toMs <= fromMs) {
       setStatus("error");
       setError("End time must be after the start time.");
       return;
     }
-    if (toMs - fromMs > MAX_RANGE_MS) {
-      setStatus("error");
-      setError(`Range is limited to ${MAX_RANGE_MS / 86_400_000} days per load.`);
-      return;
-    }
     setStatus("loading");
     setError(null);
+    setLoadNote(
+      toMs - fromMs > LARGE_RANGE_MS
+        ? `Loading ${Math.round((toMs - fromMs) / 86_400_000)} days — a long period can take a while on a site connection.`
+        : null,
+    );
     try {
       const data = await fetchReadingsBetween(SITE_CONFIG.firebaseDataPath, fromMs, toMs);
       setFetched(data);
       setVisible(PAGE_SIZE);
       setStatus("ready");
+      setLoadNote(null);
     } catch (e) {
       setStatus("error");
+      setLoadNote(null);
       setError(e instanceof Error ? e.message : "Could not load readings for that period.");
     }
   }, []);
@@ -163,7 +186,7 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
 
           {status === "loading" ? (
             <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-              Loading readings for the selected period…
+              {loadNote ?? "Loading readings for the selected period…"}
             </p>
           ) : (
             <>
@@ -221,7 +244,8 @@ function PeriodPicker({
             onClick={() => {
               setDay("");
               const to = Date.now();
-              onRunRange(to - p.ms, to);
+              // "All data" is Infinity; load() clamps the start to dataStartMs.
+              onRunRange(Number.isFinite(p.ms) ? to - p.ms : SITE_CONFIG.dataStartMs, to);
             }}
             className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
           >
