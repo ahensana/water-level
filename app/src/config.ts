@@ -7,9 +7,31 @@
  *   waterLevelFt = sensorElevationFt − (distanceMm / 1000) × 3.28084
  *
  * Sensor elevation is fitted as `loggedLevelFt + distanceMm × (3.28084 / 1000)`
- * against the register pages in `RealDataFromSite/`. Re-fitted 25 Sep 2026.
+ * against the register pages in `RealDataFromSite/`. Re-fitted 28 Sep 2026.
  *
- * THE SENSOR MOVED BETWEEN 1 AND 11 SEP 2026. The gauge held at ~3201.3 ft
+ * THE MOUNT IS NOT HOLDING. Three different elevations fit three periods:
+ *   5 Aug - 1 Sep  3212.16 ft   9 steady days
+ *   11 - 16 Sep    3204.73 ft   1 steady day
+ *   28 Sep         3209.04 ft   1 steady hour   <- in use
+ * and the days between never agreed either (21 Sep implies 3205.7, 25 Sep
+ * 3205.0). The register moved 0.24 ft across 27-28 Sep while the sensor's
+ * air gap moved 4.3 ft, so this is the sensor shifting, not the reservoir.
+ *
+ * Treat the constant as a running correction for a mount that keeps moving,
+ * not as a calibration. It is right the day it is fitted and drifts after.
+ * The fix is mechanical: until the sensor is fixed in place and aimed at open
+ * water, every re-fit here buys days, not months. If moving it becomes
+ * routine, replace this constant with dated calibration epochs so old
+ * readings keep displaying correctly instead of being cut off by
+ * `dataStartMs` each time.
+ *
+ * The 28 Sep fit: 84 readings between 14:00 and 14:38 IST holding
+ * 1973-1991 mm (spread 23 mm), against a register interpolated from 12 noon
+ * (3202.51 ft, rising ~0.01 ft/h). One hour is thin evidence — re-fit from
+ * the next full steady day.
+ *
+ * WHAT CAME BEFORE. The sensor also moved between 1 and 11 Sep 2026: the
+ * gauge held at ~3201.3 ft
  * across that gap while the air gap fell from 3265 mm (1 Sep) to ~888 mm
  * (11 Sep) — 7.4 ft of apparent rise that the register does not record. The
  * old constant, 3212.16, therefore read ~7.4 ft high on every reading after
@@ -51,10 +73,10 @@ export const SITE_CONFIG = {
 
   /**
    * Elevation of the A01 sensor face on the same staff-gauge datum (ft).
-   * Fitted on 16 Sep 2026, the first steady day after the sensor moved
-   * (977.40 m). The pre-move value was 3212.16.
+   * Fitted 28 Sep 2026 (978.71 m). Earlier fits: 3204.73 (16 Sep),
+   * 3212.16 (Aug) — see the note above on the mount not holding.
    */
-  sensorElevationFt: 3204.73,
+  sensorElevationFt: 3209.04,
 
   /** Warning band begins at this staff-gauge level (ft). */
   warningLevelFt: 3200,
@@ -88,13 +110,16 @@ export const SITE_CONFIG = {
    * and letting them into the trend chart, diurnal profile or reliability
    * calendar corrupts all three.
    *
-   * Moved from 5 Aug to 11 Sep 2026 when the sensor shifted (see the note on
-   * `sensorElevationFt`). The 5 Aug - 1 Sep record is good data, but it is on
-   * the old datum: displayed with the current constant it would read 7.4 ft
-   * low, inventing a reservoir collapse in the trend chart. It stays in RTDB,
-   * and re-reading it needs the old constant, not a wider window here.
+   * Moved to 28 Sep 2026, the current mount position. Everything before it
+   * is good data on an earlier datum — 11-25 Sep would read 4.3 ft high under
+   * the present constant, August 7.4 ft low — so it is cut rather than shown
+   * wrong. It stays in RTDB; reading it back needs that period's constant.
+   *
+   * Cutting the record on every re-fit is the cost of a single constant, and
+   * it is now the third cut. Dated calibration epochs would keep the whole
+   * series displayable; see the note on `sensorElevationFt`.
    */
-  dataStartMs: Date.parse("2026-09-11T00:00:00+05:30"),
+  dataStartMs: Date.parse("2026-09-28T00:00:00+05:30"),
 
   /**
    * After this long with no trusted reading, the level is reported as
@@ -179,11 +204,11 @@ export const SITE_CONFIG = {
    * Regenerate with `npx tsx tools/pipelineCheck.ts` after any re-fit.
    */
   calibration: {
-    basis: "18 hourly staff-gauge points, 16 Sep 2026 (first steady day after the sensor moved)",
-    /** Median app-vs-logbook error at this constant (ft), over 31 September hours. */
-    medianErrorFt: 0.002,
-    /** Std. dev. of that error (ft), over the 19 hours the sensor itself was steady. */
-    residualStdFt: 0.256,
+    basis: "84 readings over 38 minutes, 28 Sep 2026, against the noon register entry",
+    /** Median app-vs-logbook error at this constant (ft), over the fitted window. */
+    medianErrorFt: 0.0,
+    /** Std. dev. of that error (ft). 23 mm of sensor spread across the window. */
+    residualStdFt: 0.038,
     /**
      * Repeating daily oscillation the logbook does not record (ft). Measured
      * on the August record; not yet re-measured since the sensor moved, as no
@@ -192,14 +217,14 @@ export const SITE_CONFIG = {
     diurnalSwingFt: 0.119,
     /**
      * Worst single deviation from the register across the calibration window
-     * (ft). 0.61 ft is the worst among hours where the sensor was steady; over
-     * every September hour it is 4.4 ft, on days the sensor returned several
-     * distances for the same water. Verification against the gauge is expected
-     * to FAIL at the 0.3 ft `crossCheckToleranceFt` until the mount is fixed —
-     * that failure is the sensor's, and the tolerance should not be widened to
-     * hide it.
+     * (ft). Small only because the window is one steady hour: measured across
+     * a mount that moved 4.3 ft in twelve days, the figure that matters is
+     * that drift, not this one. Verification against the gauge is expected to
+     * FAIL at the 0.3 ft `crossCheckToleranceFt` whenever it moves again —
+     * that failure is the sensor's, and the tolerance should not be widened
+     * to hide it.
      */
-    worstDeviationFt: 0.61,
+    worstDeviationFt: 0.08,
   },
 
   /**

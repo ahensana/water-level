@@ -350,16 +350,44 @@ export function classifyJumpFault(
  * Deliberately conservative: see the `resyncAfterMs` note in SITE_CONFIG for
  * why adopting a new baseline quickly is worse than staying blind.
  */
-function isSustainedStep(pending: { t: number; distanceMm: number }[]): boolean {
+/**
+ * True once the newest rejected samples have agreed with each other,
+ * continuously, for longer than any dropout in the record.
+ *
+ * Measured over the trailing run of agreeing samples, not the whole pending
+ * buffer. Spanning the buffer looked equivalent and was not: the buffer is
+ * never trimmed, so a single early outlier fixed its spread above the limit
+ * forever and the escape hatch could never fire again. On 28 Sep 2026 the
+ * sensor moved, threw two false echoes at 1003 mm, then held 1973-1991 mm for
+ * over an hour — and the gauge stayed latched on the 1003 mm echo, reporting a
+ * level 3.2 ft off the register, because one 1908 mm sample early in the run
+ * kept the buffer's spread at 91 mm against a 40 mm limit.
+ *
+ * Walking back from the newest sample while min/max stay inside the limit
+ * states the intent directly: an hour of continuous agreement, which is the
+ * property that distinguishes a remount from a passing echo.
+ */
+export function isSustainedStep(pending: { t: number; distanceMm: number }[]): boolean {
   if (pending.length < SITE_CONFIG.resyncMinSamples) return false;
-  if (pending[pending.length - 1].t - pending[0].t < SITE_CONFIG.resyncAfterMs) return false;
-  let min = Infinity;
-  let max = -Infinity;
-  for (const p of pending) {
-    if (p.distanceMm < min) min = p.distanceMm;
-    if (p.distanceMm > max) max = p.distanceMm;
+
+  const newest = pending[pending.length - 1];
+  let min = newest.distanceMm;
+  let max = newest.distanceMm;
+  let count = 0;
+  let oldest = newest;
+
+  for (let i = pending.length - 1; i >= 0; i--) {
+    const p = pending[i];
+    const nextMin = Math.min(min, p.distanceMm);
+    const nextMax = Math.max(max, p.distanceMm);
+    if (nextMax - nextMin > SITE_CONFIG.resyncSpreadMm) break;
+    min = nextMin;
+    max = nextMax;
+    oldest = p;
+    count++;
   }
-  return max - min <= SITE_CONFIG.resyncSpreadMm;
+
+  return count >= SITE_CONFIG.resyncMinSamples && newest.t - oldest.t >= SITE_CONFIG.resyncAfterMs;
 }
 
 function medianSmooth(

@@ -125,6 +125,20 @@ export const FIELD_LOG = {
     3202.09, null, null, null, null, null,
     null, null, null, null, null, null,
   ],
+  // 5 PM and 6 PM on 27 Sep are overwritten in the register and left out
+  // rather than guessed; the sensor was offline all day regardless.
+  "2026-09-27": [
+    3202.27, 3202.28, 3202.30, 3202.32, 3202.35, 3202.37,
+    3202.37, 3202.38, 3202.38, 3202.39, 3202.39, 3202.39,
+    3202.39, 3202.40, 3202.40, 3202.40, null, null,
+    3202.42, 3202.42, 3202.41, 3202.41, 3202.41, 3202.42,
+  ],
+  "2026-09-28": [
+    3202.43, 3202.44, 3202.45, 3202.46, 3202.47, 3202.48,
+    3202.48, 3202.49, 3202.49, 3202.50, 3202.50, 3202.51,
+    null, null, null, null, null, null,
+    null, null, null, null, null, null,
+  ],
 };
 
 /** Daily rainfall (mm) and season cumulative (mm) as recorded at ~8-9 AM. */
