@@ -1,5 +1,4 @@
 import type { ConnectionState, DerivedReading, MonitorQualityState } from "../types";
-import { SITE_CONFIG } from "../config";
 
 interface StatusBannerProps {
   loadState: "loading" | "ready" | "error";
@@ -34,16 +33,6 @@ export function StatusBanner({
 
   if (!connection.firebaseConnected) {
     return <Banner tone="warning">Reconnecting to the real-time database…</Banner>;
-  }
-
-  if (connection.deviceConnectivity === "offline") {
-    return (
-      <Banner tone="critical">
-        Device offline — no trusted A01 reading within the last{" "}
-        {Math.round(SITE_CONFIG.offlineTimeoutMs / 1000)}s. Last good level held on screen; verify
-        modem/power on site.
-      </Banner>
-    );
   }
 
   if (reading?.isSensorFault || quality.quality === "fault") {

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import clsx from "clsx";
+import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { ANALYTICS_CONFIG } from "../config";
 import { useNow } from "../hooks/useNow";
 import { computeTrend, projectThresholdEta } from "../lib/analytics";
@@ -20,10 +21,30 @@ export function TrendForecastCard({ reading, history, loadState }: TrendForecast
     () => (reading ? projectThresholdEta(reading.waterLevelFt, trend) : null),
     [reading, trend],
   );
+  const windowPoints = useMemo(() => {
+    const cutoff = now - ANALYTICS_CONFIG.trendWindowMs;
+    return history.filter((p) => p.t >= cutoff).map((p) => ({ t: p.t, ft: p.waterLevelFt }));
+  }, [history, now]);
+  const change24hFt = useMemo(
+    () => (reading ? levelChangeSince(history, reading.waterLevelFt, now - DAY_MS) : null),
+    [history, reading, now],
+  );
 
   if (loadState === "loading" || !reading) {
     return <ListSkeleton rows={2} />;
   }
+
+  const levels = windowPoints.map((p) => p.ft);
+  const windowChangeFt = levels.length >= 2 ? levels[levels.length - 1] - levels[0] : null;
+  const windowRangeFt = levels.length >= 2 ? Math.max(...levels) - Math.min(...levels) : null;
+
+  // A "stable" rate is still a direction — say which way it leans rather than hiding it.
+  const lean =
+    trend.direction === "stable" && trend.rateFtPerHour !== null && trend.rateFtPerHour !== 0
+      ? trend.rateFtPerHour > 0
+        ? "Slowly rising · "
+        : "Slowly falling · "
+      : "";
 
   const toneClass =
     trend.direction === "rising"
@@ -40,7 +61,7 @@ export function TrendForecastCard({ reading, history, loadState }: TrendForecast
           Last {Math.round(ANALYTICS_CONFIG.trendWindowMs / 60_000)} min
         </span>
       </CardHeader>
-      <CardBody className="flex flex-1 flex-col justify-center">
+      <CardBody className="flex flex-1 flex-col justify-center gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2.5">
             <span
@@ -66,7 +87,7 @@ export function TrendForecastCard({ reading, history, loadState }: TrendForecast
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
                 {trend.direction === "unknown"
                   ? `Need ${ANALYTICS_CONFIG.trendMinPoints}+ points spanning ${Math.round(ANALYTICS_CONFIG.trendMinSpanMs / 60_000)}+ min`
-                  : `${Math.abs(trend.rateMmPerHour ?? 0).toFixed(1)} mm/hr · ${trend.windowPoints} pts / ${(trend.windowSpanMs / 60_000).toFixed(0)} min`}
+                  : `${lean}${Math.abs(trend.rateMmPerHour ?? 0).toFixed(1)} mm/hr · ${trend.windowPoints} pts / ${(trend.windowSpanMs / 60_000).toFixed(0)} min`}
               </p>
             </div>
           </div>
@@ -93,8 +114,85 @@ export function TrendForecastCard({ reading, history, loadState }: TrendForecast
             )}
           </div>
         </div>
+
+        {windowPoints.length >= 2 && (
+          <div className="h-24" aria-label="Water level over the trend window">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={windowPoints} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                <YAxis hide domain={sparkDomain} />
+                <Tooltip content={<SparkTooltip />} />
+                <Line
+                  type="monotone"
+                  dataKey="ft"
+                  stroke="#0f62fe"
+                  strokeWidth={1.75}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        <div className="grid grid-cols-3 gap-2">
+          <Stat label={`Change, ${Math.round(ANALYTICS_CONFIG.trendWindowMs / 60_000)} min`} value={formatDelta(windowChangeFt)} />
+          <Stat label="Change, 24 h" value={formatDelta(change24hFt)} />
+          <Stat
+            label={`Range, ${Math.round(ANALYTICS_CONFIG.trendWindowMs / 60_000)} min`}
+            value={windowRangeFt === null ? "—" : `${windowRangeFt.toFixed(2)} ft`}
+          />
+        </div>
       </CardBody>
     </Card>
+  );
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** How far from the target time a history point may sit and still stand in for it. */
+const CHANGE_TOLERANCE_MS = 30 * 60 * 1000;
+
+/** Current level minus the level nearest `atMs`, or null if nothing was recorded near then. */
+function levelChangeSince(history: SessionHistoryPoint[], currentFt: number, atMs: number): number | null {
+  let nearest: SessionHistoryPoint | null = null;
+  for (const p of history) {
+    if (!nearest || Math.abs(p.t - atMs) < Math.abs(nearest.t - atMs)) nearest = p;
+  }
+  if (!nearest || Math.abs(nearest.t - atMs) > CHANGE_TOLERANCE_MS) return null;
+  return currentFt - nearest.waterLevelFt;
+}
+
+/** Pads the sparkline's y-range so a near-flat line isn't stretched into dramatic swings. */
+function sparkDomain([min, max]: readonly [number, number]): [number, number] {
+  const pad = Math.max(0.05 - (max - min), 0) / 2 + 0.01;
+  return [min - pad, max + pad];
+}
+
+function formatDelta(ft: number | null): string {
+  if (ft === null) return "—";
+  const sign = ft > 0.005 ? "+" : ft < -0.005 ? "−" : "±";
+  return `${sign}${Math.abs(ft).toFixed(2)} ft`;
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800/60">
+      <p className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">{label}</p>
+      <p className="text-sm font-semibold tabular-nums text-neutral-900 dark:text-white">{value}</p>
+    </div>
+  );
+}
+
+function SparkTooltip({ active, payload }: { active?: boolean; payload?: { payload: { t: number; ft: number } }[] }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs shadow-md dark:border-neutral-700 dark:bg-neutral-900">
+      <p className="text-neutral-500 dark:text-neutral-400">
+        {new Date(p.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+      </p>
+      <p className="font-semibold tabular-nums text-neutral-900 dark:text-white">{p.ft.toFixed(2)} ft</p>
+    </div>
   );
 }
 

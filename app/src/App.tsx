@@ -1,21 +1,20 @@
 import { useState } from "react";
 import { AlertHistoryCard } from "./components/AlertHistoryCard";
 import { AlertPanel } from "./components/AlertPanel";
-import { DeviceHealthCard } from "./components/DeviceHealthCard";
+import { DailySummaryCard } from "./components/DailySummaryCard";
 import { DiurnalProfileCard } from "./components/DiurnalProfileCard";
-import { EnvironmentalCard } from "./components/EnvironmentalCard";
 import { Footer } from "./components/Footer";
 import { GaugeCard } from "./components/GaugeCard";
 import { Header } from "./components/Header";
 import { HeroStats } from "./components/HeroStats";
 import { HourlyGaugeCard } from "./components/HourlyGaugeCard";
 import { MastheadBar } from "./components/MastheadBar";
-import { QualityAnalyticsCard } from "./components/QualityAnalyticsCard";
 import { ReadingHistoryPanel } from "./components/ReadingHistoryPanel";
 import { ReliabilityCalendarCard } from "./components/ReliabilityCalendarCard";
 import { ReportPanel } from "./components/ReportPanel";
 import { SensorCard } from "./components/SensorCard";
 import { StatusBanner } from "./components/StatusBanner";
+import { ThresholdDistanceCard } from "./components/ThresholdDistanceCard";
 import { TrendChart } from "./components/TrendChart";
 import { TrendForecastCard } from "./components/TrendForecastCard";
 import { useTheme } from "./hooks/useTheme";
@@ -98,28 +97,19 @@ function App() {
               />
             </section>
 
-            <section aria-label="Threshold breach history">
-              <AlertHistoryCard history={history} loadState={loadState} />
-            </section>
-          </div>
+            <div className="flex flex-col gap-4">
+              <section aria-label="Threshold breach history">
+                <AlertHistoryCard history={history} loadState={loadState} />
+              </section>
 
-          <SectionDivider
-            title="Technical & Engineering Diagnostics"
-            subtitle="Device telemetry, sensor QA, and calibration reference for site engineers"
-          />
+              <section aria-label="Distance to alert levels">
+                <ThresholdDistanceCard reading={reading} loadState={loadState} />
+              </section>
 
-          <section aria-label="Device and network health">
-            <DeviceHealthCard reading={reading} history={history} rawHistory={rawHistory} loadState={loadState} />
-          </section>
-
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <section aria-label="Sensor quality analytics and calibration">
-              <QualityAnalyticsCard rawHistory={rawHistory} loadState={loadState} />
-            </section>
-
-            <section aria-label="Environmental diagnostics">
-              <EnvironmentalCard history={history} loadState={loadState} />
-            </section>
+              <section aria-label="Daily level summary">
+                <DailySummaryCard history={history} loadState={loadState} />
+              </section>
+            </div>
           </div>
 
           <SectionDivider

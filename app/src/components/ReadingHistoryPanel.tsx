@@ -461,8 +461,8 @@ function FilterBar({
         filters.toHour !== null &&
         filters.fromHour > filters.toHour && (
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
-            Window wraps past midnight — including {pad(filters.fromHour)}:00–23:59 and 00:00–
-            {pad(filters.toHour)}:59.
+            Window wraps past midnight — including {hourLabel(filters.fromHour)}–11:59 PM and 12:00 AM–
+            {hourLabel(filters.toHour, "59")}.
           </p>
         )}
     </div>
@@ -487,7 +487,7 @@ function HourSelect({
       <option value="">{label}</option>
       {Array.from({ length: 24 }, (_, h) => (
         <option key={h} value={h}>
-          {pad(h)}:00
+          {hourLabel(h)}
         </option>
       ))}
     </select>
@@ -748,8 +748,13 @@ function formatStamp(ms: number, withSeconds = false): string {
     hour: "2-digit",
     minute: "2-digit",
     ...(withSeconds ? { second: "2-digit" as const } : {}),
-    hour12: false,
+    hour12: true,
   });
+}
+
+/** 12-hour label for a whole hour, e.g. 0 → "12:00 AM", 13 → "1:00 PM". */
+function hourLabel(h: number, minutes = "00"): string {
+  return `${h % 12 === 0 ? 12 : h % 12}:${minutes} ${h < 12 ? "AM" : "PM"}`;
 }
 
 function toLocalInput(ms: number): string {

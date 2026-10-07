@@ -139,6 +139,20 @@ export const FIELD_LOG = {
     null, null, null, null, null, null,
     null, null, null, null, null, null,
   ],
+  // Register page starts at 10 AM. 6, 7 and 8 PM are overwritten and left
+  // out rather than guessed.
+  "2026-10-06": [
+    null, null, null, null, null, null,
+    null, null, null, 3203.04, 3203.04, 3203.05,
+    3203.05, 3203.06, 3203.06, 3203.07, 3203.07, null,
+    null, null, 3203.03, 3203.00, 3202.99, 3202.98,
+  ],
+  "2026-10-07": [
+    3202.97, 3202.97, 3202.98, 3202.99, 3203.00, 3203.01,
+    3202.99, 3202.98, 3202.97, 3202.97, null, null,
+    null, null, null, null, null, null,
+    null, null, null, null, null, null,
+  ],
 };
 
 /** Daily rainfall (mm) and season cumulative (mm) as recorded at ~8-9 AM. */

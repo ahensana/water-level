@@ -21,7 +21,7 @@ export function AlertPanel({ reading, history, loadState, quality, onOpenHistory
   const levelTone = reading.isSensorFault ? "critical" : reading.alertLevel;
 
   return (
-    <Card>
+    <Card className="flex h-full flex-col">
       <CardHeader>
         <CardTitle>Alert Monitoring</CardTitle>
         <StatusBadge
@@ -29,7 +29,7 @@ export function AlertPanel({ reading, history, loadState, quality, onOpenHistory
           label={reading.isSensorFault ? "Sensor Fault" : ALERT_LEVEL_LABEL[reading.alertLevel]}
         />
       </CardHeader>
-      <CardBody>
+      <CardBody className="flex min-h-0 flex-1 flex-col">
         {reading.isSensorFault ? (
           <div className="rounded-lg border border-critical-200 bg-critical-50 p-3 dark:border-critical-500/30 dark:bg-critical-500/10">
             <p className="text-sm font-semibold text-critical-700 dark:text-critical-400">
@@ -100,7 +100,7 @@ export function AlertPanel({ reading, history, loadState, quality, onOpenHistory
             No trusted readings yet — waiting for valid A01 samples.
           </p>
         ) : (
-          <ul className="max-h-64 divide-y divide-neutral-100 overflow-y-auto dark:divide-neutral-800">
+          <ul className="min-h-64 flex-1 basis-0 divide-y divide-neutral-100 overflow-y-auto dark:divide-neutral-800">
             {[...history].reverse().slice(0, 80).map((point) => (
               <li key={point.t} className="flex items-center justify-between gap-3 py-1.5">
                 <span className="text-sm font-medium tabular-nums text-neutral-700 dark:text-neutral-200">

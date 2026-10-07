@@ -7,15 +7,24 @@
  *   waterLevelFt = sensorElevationFt − (distanceMm / 1000) × 3.28084
  *
  * Sensor elevation is fitted as `loggedLevelFt + distanceMm × (3.28084 / 1000)`
- * against the register pages in `RealDataFromSite/`. Re-fitted 28 Sep 2026.
+ * against the register pages in `RealDataFromSite/`. Re-fitted 7 Oct 2026.
  *
- * THE MOUNT IS NOT HOLDING. Three different elevations fit three periods:
+ * THE MOUNT IS NOT HOLDING. Four different elevations fit four periods:
  *   5 Aug - 1 Sep  3212.16 ft   9 steady days
  *   11 - 16 Sep    3204.73 ft   1 steady day
- *   28 Sep         3209.04 ft   1 steady hour   <- in use
+ *   28 Sep         3209.04 ft   1 steady hour
+ *   6 - 7 Oct      3208.75 ft   22 steady hours   <- in use
  * and the days between never agreed either (21 Sep implies 3205.7, 25 Sep
  * 3205.0). The register moved 0.24 ft across 27-28 Sep while the sensor's
  * air gap moved 4.3 ft, so this is the sensor shifting, not the reservoir.
+ *
+ * The 6-7 Oct fit is the best this mount has had: 22 register hours from
+ * 10 AM 6 Oct to 10 AM 7 Oct, implied elevation 3208.72-3208.79 ft (std
+ * 0.017 ft), and the sensor's hour-to-hour movement tracks the register to
+ * 3 mm on average. Between 28 Sep and it the feed was erratic (30 Sep - 2 Oct,
+ * 340-2900 mm within single hours) and then silent until 5 Oct, so the sensor
+ * was likely disturbed again; it is treated as a new epoch, not a correction
+ * to the 28 Sep one.
  *
  * Treat the constant as a running correction for a mount that keeps moving,
  * not as a calibration. It is right the day it is fitted and drifts after.
@@ -73,14 +82,14 @@ export const SITE_CONFIG = {
 
   /**
    * Elevation of the A01 sensor face on the same staff-gauge datum (ft), as
-   * fitted for the CURRENT mount position (28 Sep 2026, 978.71 m).
+   * fitted for the CURRENT mount position (7 Oct 2026, 978.03 m).
    *
    * Use this only for "what is the sensor set to now" — the QA card, the
    * report header, the trend chart's axis. Converting a stored reading goes
    * through `distanceToWaterLevelFt(mm, atMs)`, which picks the elevation that
    * was true when the reading was taken: see CALIBRATION_EPOCHS below.
    */
-  sensorElevationFt: 3209.04,
+  sensorElevationFt: 3208.75,
 
   /** Warning band begins at this staff-gauge level (ft). */
   warningLevelFt: 3200,
@@ -208,11 +217,11 @@ export const SITE_CONFIG = {
    * Regenerate with `npx tsx tools/pipelineCheck.ts` after any re-fit.
    */
   calibration: {
-    basis: "84 readings over 38 minutes, 28 Sep 2026, against the noon register entry",
+    basis: "22 hourly register entries, 10 AM 6 Oct - 10 AM 7 Oct 2026",
     /** Median app-vs-logbook error at this constant (ft), over the fitted window. */
-    medianErrorFt: 0.0,
-    /** Std. dev. of that error (ft). 23 mm of sensor spread across the window. */
-    residualStdFt: 0.038,
+    medianErrorFt: 0.001,
+    /** Std. dev. of that error (ft), from the pipeline replay over the fitted window. */
+    residualStdFt: 0.018,
     /**
      * Repeating daily oscillation the logbook does not record (ft). Measured
      * on the August record; not yet re-measured since the sensor moved, as no
@@ -221,14 +230,15 @@ export const SITE_CONFIG = {
     diurnalSwingFt: 0.119,
     /**
      * Worst single deviation from the register across the calibration window
-     * (ft). Small only because the window is one steady hour: measured across
-     * a mount that moved 4.3 ft in twelve days, the figure that matters is
-     * that drift, not this one. Verification against the gauge is expected to
+     * (ft), from the app pipeline replay. Small because the window is one
+     * steady day: measured across a mount that has moved three times since
+     * August, the figure that matters is that drift, not this one.
+     * Verification against the gauge is expected to
      * FAIL at the 0.3 ft `crossCheckToleranceFt` whenever it moves again —
      * that failure is the sensor's, and the tolerance should not be widened
      * to hide it.
      */
-    worstDeviationFt: 0.08,
+    worstDeviationFt: 0.04,
   },
 
   /**
@@ -279,6 +289,11 @@ export const CALIBRATION_EPOCHS = [
     fromMs: Date.parse("2026-09-26T00:00:00+05:30"),
     elevationFt: 3209.04,
     note: "After the second move. Fitted on 84 readings, 14:00-14:38 IST on 28 Sep.",
+  },
+  {
+    fromMs: Date.parse("2026-10-03T00:00:00+05:30"),
+    elevationFt: 3208.75,
+    note: "After the 30 Sep - 2 Oct disturbance. Fitted on 22 register hours, 10 AM 6 Oct - 10 AM 7 Oct.",
   },
 ] as const;
 

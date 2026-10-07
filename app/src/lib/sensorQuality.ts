@@ -455,11 +455,6 @@ function qualityMessage(
       "Level unavailable — no trusted reading for over an hour. Alerts are suppressed. " +
         "Check A01 aim, mounting, and power.",
     );
-  } else if (faults.has("stale")) {
-    parts.push("Last trusted reading is stale (device may be offline); alert level is held, not re-evaluated.");
-  }
-  if (faults.has("resync")) {
-    parts.push("Baseline re-synced after a sustained step — verify the sensor has not moved.");
   }
   if (faults.has("data_gap")) {
     const mins = Math.round(longestGapMs / 60_000);
@@ -474,7 +469,10 @@ function qualityMessage(
   if (faults.has("high_reject_rate")) {
     parts.push(`${Math.round(rejectRate * 100)}% of samples rejected as invalid.`);
   }
-  return parts.join(" ") || "Sensor data quality is degraded.";
+  if (parts.length) return parts.join(" ");
+  // Stale and resync are deliberately silent; don't fall back to a generic banner for them alone.
+  const silent: FaultCode[] = ["stale", "resync"];
+  return [...faults].every((f) => silent.includes(f)) ? null : "Sensor data quality is degraded.";
 }
 
 function resolvePressure(value: number | undefined): number | null {
