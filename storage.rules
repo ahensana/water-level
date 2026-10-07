@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Only the satellite images the functions publish are public. Functions write
+// with the Admin SDK, which bypasses these rules; nobody else can write.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /satellite/{file} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

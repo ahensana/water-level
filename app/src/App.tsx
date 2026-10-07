@@ -17,12 +17,18 @@ import { StatusBanner } from "./components/StatusBanner";
 import { ThresholdDistanceCard } from "./components/ThresholdDistanceCard";
 import { TrendChart } from "./components/TrendChart";
 import { TrendForecastCard } from "./components/TrendForecastCard";
+import { CatchmentRainfallCard } from "./components/satellite/CatchmentRainfallCard";
+import { ReservoirAreaCard } from "./components/satellite/ReservoirAreaCard";
+import { SatelliteImageryCard } from "./components/satellite/SatelliteImageryCard";
+import { WeatherRainCard } from "./components/satellite/WeatherRainCard";
+import { useSatellite } from "./hooks/useSatellite";
 import { useTheme } from "./hooks/useTheme";
 import { useWaterMonitor } from "./hooks/useWaterMonitor";
 
 function App() {
   const { loadState, errorMessage, reading, history, rawHistory, connection, quality } = useWaterMonitor();
   const { theme, toggleTheme } = useTheme();
+  const satellite = useSatellite();
   const [sensorOpen, setSensorOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -124,6 +130,29 @@ function App() {
 
             <section aria-label="Reporting reliability calendar">
               <ReliabilityCalendarCard rawHistory={rawHistory} loadState={loadState} />
+            </section>
+          </div>
+
+          <SectionDivider
+            title="Satellite & Weather"
+            subtitle="Rain at the dam and over the catchment, and an independent satellite view of the reservoir"
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <section aria-label="Rain at the dam">
+              <WeatherRainCard weather={satellite.weather} job={satellite.jobs.weather} />
+            </section>
+
+            <section aria-label="Catchment rainfall from satellite">
+              <CatchmentRainfallCard rainfall={satellite.rainfall} site={satellite.site} job={satellite.jobs.rainfall} />
+            </section>
+
+            <section aria-label="Reservoir water area from satellite">
+              <ReservoirAreaCard reservoir={satellite.reservoir} site={satellite.site} job={satellite.jobs.reservoir} />
+            </section>
+
+            <section aria-label="Latest satellite image">
+              <SatelliteImageryCard imagery={satellite.imagery} job={satellite.jobs.reservoir} />
             </section>
           </div>
         </div>
