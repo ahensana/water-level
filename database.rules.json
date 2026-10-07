@@ -10,7 +10,7 @@
             ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20000"
           },
           "timestamp": {
-            ".validate": "newData.isNumber()"
+            ".validate": "newData.isNumber() && newData.val() === now"
           },
           "pressure": {
             ".validate": "newData.isNumber()"
@@ -32,6 +32,10 @@
           }
         }
       }
+    },
+    "satellite": {
+      ".read": true,
+      ".write": false
     }
   }
 }
