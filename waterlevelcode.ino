@@ -49,9 +49,14 @@ Adafruit_BMP280 bmp;             // BMP280 on I2C (D2=SDA, D1=SCL)
 #define gsmSerial Serial         // A7670C on hardware UART0
 #define debug     Serial1        // debug logs on UART1 (D4, TX-only)
 
-// ---- Firebase / APN config ----
+// ---- Upload / APN config ----
 const char APN[]          = "airteliot.com";
-const char FIREBASE_URL[] = "https://water-level-ae453-default-rtdb.asia-southeast1.firebasedatabase.app/water_monitor/current.json";
+// Readings go to the `ingest` Cloud Function, not straight to the database,
+// so the database can refuse writes from anyone else. URL and key live in
+// secrets.h next to this sketch (copy secrets.example.h; it is git-ignored).
+// The key must match the DEVICE_INGEST_KEY secret set on the functions.
+#include "secrets.h"
+const char UPLOAD_URL[] = INGEST_URL "?key=" DEVICE_INGEST_KEY;
 
 int   lastDistance = -1;                       // latest valid distance (mm)
 bool  bmpReady     = false;                    // false if the BMP280 wasn't found
@@ -243,7 +248,7 @@ void uploadToFirebase(int distanceMM, float pressureHPa, float temperatureC,
   debug.println(F("--- Uploading to Firebase ---"));
   sendAT("AT+HTTPTERM", 1000);
   sendAT("AT+HTTPINIT", 3000);
-  sendAT("AT+HTTPPARA=\"URL\",\"" + String(FIREBASE_URL) + "\"", 3000);
+  sendAT("AT+HTTPPARA=\"URL\",\"" + String(UPLOAD_URL) + "\"", 3000);
   sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 2000);
 
   sendAT("AT+HTTPDATA=" + String(json.length()) + ",10000", 2000);

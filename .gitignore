@@ -1,0 +1,8 @@
+# Firmware secrets: copy secrets.example.h to secrets.h, never commit it.
+secrets.h
+
+# Python functions
+functions/venv/
+functions/__pycache__/
+functions/**/__pycache__/
+.pytest_cache/

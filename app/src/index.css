@@ -58,6 +58,27 @@ html.dark {
   color-scheme: dark;
 }
 
+/* Satellite & weather charts. Validated pairs (dataviz validator): observed vs
+   forecast rain is one blue ramp, two steps; radar vs optical is blue vs orange.
+   Dark mode uses its own steps against the dark card surface, not a flip. */
+:root {
+  --viz-obs: #0f62fe;
+  --viz-fcst: #86b6ef;
+  --viz-alt: #eb6834;
+  --viz-grid: #e2e8f0;
+  --viz-axis: #64748b;
+  --viz-surface: #ffffff;
+}
+
+html.dark {
+  --viz-obs: #4791ff;
+  --viz-fcst: #1c5cab;
+  --viz-alt: #d95926;
+  --viz-grid: #1e293b;
+  --viz-axis: #94a3b8;
+  --viz-surface: #0f172a;
+}
+
 * {
   box-sizing: border-box;
 }

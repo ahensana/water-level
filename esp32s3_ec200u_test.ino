@@ -71,10 +71,14 @@ HardwareSerial sensor(2);  // UART2 -> A01NYUB
 Adafruit_BMP280 bmp;
 #define debug Serial       // native USB CDC
 
-// ---- Config ----
+// ---- Upload / APN config ----
 const char APN[] = "airteliot.com";
-const char FIREBASE_URL[] =
-    "https://water-level-ae453-default-rtdb.asia-southeast1.firebasedatabase.app/water_monitor/current.json";
+// Readings go to the `ingest` Cloud Function, not straight to the database,
+// so the database can refuse writes from anyone else. URL and key live in
+// secrets.h next to this sketch (copy secrets.example.h; it is git-ignored).
+// The key must match the DEVICE_INGEST_KEY secret set on the functions.
+#include "secrets.h"
+const char UPLOAD_URL[] = INGEST_URL "?key=" DEVICE_INGEST_KEY;
 
 const unsigned long UPLOAD_INTERVAL_MS = 30000;
 
@@ -504,7 +508,7 @@ bool uploadReading(int distanceMm) {
   debug.println(body);
 
   int status = 0;
-  return httpPost(String(FIREBASE_URL), body, &status);
+  return httpPost(String(UPLOAD_URL), body, &status);
 }
 
 // ---------------------------------------------------------------- self-test
@@ -657,9 +661,10 @@ void loop() {
  * - seclevel 0 disables TLS certificate verification, so the connection is
  *   encrypted but not authenticated. Raise it to 2 and load the CA with
  *   AT+QFUPL / AT+QSSLCFG="cacert" once bring-up is done.
- * - The Firebase URL carries no auth token, so the database rules must allow
- *   unauthenticated writes. Same exposure as the current firmware - worth
- *   closing separately.
+ * - Uploads go through the `ingest` function with a device key (secrets.h),
+ *   so the database no longer needs to accept public writes. The key travels
+ *   in the URL; with seclevel 0 a man-in-the-middle on the cellular path
+ *   could read it, which is one more reason to raise seclevel before shipping.
  * - There is no retry or backoff: a failed POST is simply dropped and the next
  *   one goes out 30 s later.
  * - Battery and signal are queried on every upload. If you later move to a
