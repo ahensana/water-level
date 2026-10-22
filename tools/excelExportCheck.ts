@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   );
 
   const unitless = spec.columns.filter(
-    (c) => !/\(.+\)/.test(c.header) && !["Alert band"].includes(c.header),
+    (c) => !/\(.+\)/.test(c.header) && !["Alert band", "Status"].includes(c.header),
   );
   check(unitless.length === 0, "every measurement header names its unit", unitless.map((c) => c.header).join(", "));
 

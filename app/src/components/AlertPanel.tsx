@@ -1,19 +1,49 @@
-import { ALERT_LEVEL_ACTION, ALERT_LEVEL_LABEL } from "../lib/waterLevel";
-import { FAULT_CODE_LABEL } from "../lib/sensorQuality";
-import type { DerivedReading, MonitorQualityState, SessionHistoryPoint } from "../types";
+import { useMemo } from "react";
+import clsx from "clsx";
+import {
+  ALERT_LEVEL_ACTION,
+  ALERT_LEVEL_LABEL,
+  METERS_TO_FEET,
+  distanceToWaterLevelFt,
+  resolveDeviceTimeMs,
+  resolveDistanceMm,
+} from "../lib/waterLevel";
+import { FAULT_CODE_LABEL, classifyDistanceFault } from "../lib/sensorQuality";
+import type { DerivedReading, MonitorQualityState, RawWaterMonitorReading } from "../types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { StatusBadge } from "./ui/StatusBadge";
 import { ListSkeleton } from "./Skeletons";
 
 interface AlertPanelProps {
   reading: DerivedReading | null;
-  history: SessionHistoryPoint[];
+  rawHistory: RawWaterMonitorReading[];
   loadState: "loading" | "ready" | "error";
   quality: MonitorQualityState;
   onOpenHistory: () => void;
 }
 
-export function AlertPanel({ reading, history, loadState, quality, onOpenHistory }: AlertPanelProps) {
+export function AlertPanel({ reading, rawHistory, loadState, quality, onOpenHistory }: AlertPanelProps) {
+  // Every reading the sensor sent, rejected ones included and marked, so a fault is visible
+  // in the list rather than looking like the feed simply stopped.
+  const rows = useMemo(
+    () =>
+      rawHistory
+        .map((raw, i) => {
+          const mm = resolveDistanceMm(raw);
+          const t = resolveDeviceTimeMs(raw);
+          return {
+            key: `${t ?? "x"}-${i}`,
+            t,
+            mm,
+            fault: classifyDistanceFault(mm),
+            ft: distanceToWaterLevelFt(mm, t ?? undefined),
+          };
+        })
+        .sort((a, b) => (b.t ?? 0) - (a.t ?? 0)),
+    [rawHistory],
+  );
+  const rejectedCount = rows.filter((r) => r.fault).length;
+
   if (loadState === "loading" || !reading) {
     return <ListSkeleton rows={3} />;
   }
@@ -85,7 +115,7 @@ export function AlertPanel({ reading, history, loadState, quality, onOpenHistory
 
         <div className="mt-3 mb-1.5 flex items-baseline justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-            Trusted reading history
+            All readings received
           </p>
           <button
             type="button"
@@ -95,38 +125,49 @@ export function AlertPanel({ reading, history, loadState, quality, onOpenHistory
             View full history
           </button>
         </div>
-        {history.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="rounded-lg bg-neutral-50 px-3 py-4 text-center text-sm text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400">
-            No trusted readings yet — waiting for valid A01 samples.
+            No readings received yet.
           </p>
         ) : (
           <ul className="min-h-64 flex-1 basis-0 divide-y divide-neutral-100 overflow-y-auto dark:divide-neutral-800">
-            {[...history].reverse().slice(0, 80).map((point) => (
-              <li key={point.t} className="flex items-center justify-between gap-3 py-1.5">
-                <span className="text-sm font-medium tabular-nums text-neutral-700 dark:text-neutral-200">
-                  {Math.round(point.distanceMm)} mm
-                  <span className="ml-1.5 text-xs font-normal text-neutral-400 dark:text-neutral-500">
-                    · {point.waterLevelFt.toFixed(2)} ft / {point.waterLevelM.toFixed(2)} m
-                  </span>
+            {rows.map((row) => (
+              <li key={row.key} className="flex items-center justify-between gap-3 py-1.5">
+                <span
+                  className={clsx(
+                    "text-sm font-medium tabular-nums",
+                    row.fault ? "text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-200",
+                  )}
+                >
+                  {Number.isFinite(row.mm) ? `${Math.round(row.mm)} mm` : "—"}
+                  {row.fault ? (
+                    <span className="ml-1.5 rounded bg-critical-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-critical-600 dark:bg-critical-500/10 dark:text-critical-400">
+                      Rejected · {FAULT_CODE_LABEL[row.fault]}
+                    </span>
+                  ) : (
+                    <span className="ml-1.5 text-xs font-normal text-neutral-400 dark:text-neutral-500">
+                      · {row.ft.toFixed(2)} ft / {(row.ft / METERS_TO_FEET).toFixed(2)} m
+                    </span>
+                  )}
                 </span>
                 <time className="text-xs tabular-nums text-neutral-400 dark:text-neutral-500">
-                  {new Date(point.t).toLocaleString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {row.t === null
+                    ? "—"
+                    : new Date(row.t).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                 </time>
               </li>
             ))}
           </ul>
         )}
-        {history.length > 80 && (
-          <p className="mt-1.5 text-[11px] text-neutral-400 dark:text-neutral-500">
-            Showing the latest 80 of {history.length.toLocaleString()} trusted readings in this session — open
-            the full history to filter by period, level, or alert band.
-          </p>
-        )}
+        <p className="mt-1.5 text-[11px] text-neutral-400 dark:text-neutral-500">
+          {rows.length.toLocaleString()} readings loaded, newest first ({rejectedCount.toLocaleString()} rejected
+          by the sensor checks) — open the full history to filter by period, level, or alert band.
+        </p>
       </CardBody>
     </Card>
   );

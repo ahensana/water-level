@@ -1,12 +1,19 @@
-import { processMonitorPipeline } from "./sensorQuality";
-import { ALERT_LEVEL_LABEL, replayAlertLevels } from "./waterLevel";
+import { SITE_CONFIG } from "../config";
+import { FAULT_CODE_LABEL, classifyDistanceFault, processMonitorPipeline } from "./sensorQuality";
+import { ALERT_LEVEL_LABEL, replayAlertLevels, resolveDeviceTimeMs, resolveDistanceMm } from "./waterLevel";
 import { formatIst } from "./csvExport";
 import type { SheetSpec } from "./excelExport";
-import type { AlertLevel, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
+import type { AlertLevel, FaultCode, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
 
 /** A trusted reading with the alert band it fell in. */
 export interface TrustedReading extends SessionHistoryPoint {
   alertLevel: AlertLevel;
+  /**
+   * Set only on readings the pipeline rejected (see `buildAllReadings`). Their
+   * level, capacity and band are meaningless (NaN / "normal"), and everything
+   * that summarises or filters by level skips them.
+   */
+  fault?: FaultCode | null;
 }
 
 export interface HistoryFilters {
@@ -18,6 +25,8 @@ export interface HistoryFilters {
   fromHour: number | null;
   toHour: number | null;
   sort: "newest" | "oldest";
+  /** Which readings to include: everything, only trusted, or only the ones the pipeline rejected. */
+  status: "all" | "trusted" | "rejected";
 }
 
 export const DEFAULT_FILTERS: HistoryFilters = {
@@ -27,6 +36,7 @@ export const DEFAULT_FILTERS: HistoryFilters = {
   fromHour: null,
   toHour: null,
   sort: "newest",
+  status: "all",
 };
 
 /**
@@ -49,15 +59,61 @@ export function buildTrustedHistory(readings: RawWaterMonitorReading[]): Trusted
   return history.map((point, i) => ({ ...point, alertLevel: levels[i] }));
 }
 
-export function filterTrustedHistory(
-  rows: TrustedReading[],
-  filters: HistoryFilters,
-): TrustedReading[] {
+/**
+ * Every reading received in a set of raw readings, oldest first: the trusted
+ * series from `buildTrustedHistory`, plus each reading the pipeline threw out,
+ * marked with why.
+ *
+ * The trusted view alone makes a blocked or failed sensor look like the feed
+ * simply stopped — the device keeps uploading, but none of it appears. Rejected
+ * rows carry no level: converting a blind-zone 250 mm to feet would print a
+ * convincing number that means nothing.
+ */
+export function buildAllReadings(readings: RawWaterMonitorReading[]): TrustedReading[] {
+  const trusted = buildTrustedHistory(readings);
+  const seen = new Set(trusted.map((r) => r.t));
+  const rejected: TrustedReading[] = [];
+  for (const raw of readings) {
+    const t = resolveDeviceTimeMs(raw);
+    if (t === null || t < SITE_CONFIG.dataStartMs || seen.has(t)) continue;
+    seen.add(t);
+    const distanceMm = resolveDistanceMm(raw);
+    rejected.push({
+      t,
+      distanceMm,
+      waterLevelFt: NaN,
+      waterLevelM: NaN,
+      capacityPct: NaN,
+      trusted: false,
+      temperatureC: finiteOrNull(raw.temperature),
+      pressureHpa: finiteOrNull(raw.pressure),
+      batteryVoltage: finiteOrNull(raw.battery_voltage),
+      signalStrength: finiteOrNull(raw.signal_strength),
+      alertLevel: "normal",
+      // Physically valid but still not trusted means the jump filter dropped it.
+      fault: classifyDistanceFault(distanceMm) ?? "spike",
+    });
+  }
+  return [...trusted, ...rejected].sort((a, b) => a.t - b.t);
+}
+
+function finiteOrNull(v: number | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+export function filterTrustedHistory<T extends TrustedReading>(rows: T[], filters: HistoryFilters): T[] {
   const bands = filters.alertLevels;
+  const levelFiltered = bands.length > 0 || filters.minLevelFt !== null || filters.maxLevelFt !== null;
   const filtered = rows.filter((row) => {
-    if (bands.length > 0 && !bands.includes(row.alertLevel)) return false;
-    if (filters.minLevelFt !== null && row.waterLevelFt < filters.minLevelFt) return false;
-    if (filters.maxLevelFt !== null && row.waterLevelFt > filters.maxLevelFt) return false;
+    if (row.fault) {
+      // A rejected reading has no level or band, so it cannot match a filter on either.
+      if (filters.status === "trusted" || levelFiltered) return false;
+    } else {
+      if (filters.status === "rejected") return false;
+      if (bands.length > 0 && !bands.includes(row.alertLevel)) return false;
+      if (filters.minLevelFt !== null && row.waterLevelFt < filters.minLevelFt) return false;
+      if (filters.maxLevelFt !== null && row.waterLevelFt > filters.maxLevelFt) return false;
+    }
     if (filters.fromHour !== null && filters.toHour !== null) {
       const hour = new Date(row.t).getHours();
       // A night shift spans midnight, so the window has to be allowed to wrap.
@@ -78,12 +134,15 @@ export function isFilterActive(filters: HistoryFilters): boolean {
     filters.alertLevels.length > 0 ||
     filters.minLevelFt !== null ||
     filters.maxLevelFt !== null ||
+    filters.status !== "all" ||
     (filters.fromHour !== null && filters.toHour !== null)
   );
 }
 
 export interface HistorySummary {
+  /** Trusted readings; the level figures below cover these alone (NaN when there are none). */
   count: number;
+  rejectedCount: number;
   minFt: number;
   maxFt: number;
   medianFt: number;
@@ -92,17 +151,19 @@ export interface HistorySummary {
   bandCounts: Record<AlertLevel, number>;
 }
 
-export function summarizeHistory(rows: TrustedReading[]): HistorySummary | null {
-  if (rows.length === 0) return null;
+export function summarizeHistory(all: TrustedReading[]): HistorySummary | null {
+  if (all.length === 0) return null;
+  const rows = all.filter((r) => !r.fault);
   const levels = rows.map((r) => r.waterLevelFt).sort((a, b) => a - b);
-  const times = rows.map((r) => r.t);
+  const times = all.map((r) => r.t);
   const bandCounts: Record<AlertLevel, number> = { normal: 0, warning: 0, critical: 0 };
   for (const row of rows) bandCounts[row.alertLevel]++;
   return {
     count: rows.length,
-    minFt: levels[0],
-    maxFt: levels[levels.length - 1],
-    medianFt: levels[levels.length >> 1],
+    rejectedCount: all.length - rows.length,
+    minFt: levels.length ? levels[0] : NaN,
+    maxFt: levels.length ? levels[levels.length - 1] : NaN,
+    medianFt: levels.length ? levels[levels.length >> 1] : NaN,
     firstMs: Math.min(...times),
     lastMs: Math.max(...times),
     bandCounts,
@@ -121,23 +182,30 @@ const CSV_COLUMNS = [
   "pressure_hpa",
   "battery_v",
   "signal_csq",
+  "status",
 ] as const;
 
-/** Official-record CSV of the filtered trusted history. */
+/** "Trusted", or "Rejected: <reason>". Kept free of commas so the CSV needs no quoting. */
+function statusText(r: TrustedReading): string {
+  return r.fault ? `Rejected: ${FAULT_CODE_LABEL[r.fault].replace(/,/g, ";")}` : "Trusted";
+}
+
+/** Official-record CSV of the filtered history. Rejected rows leave the level columns blank. */
 export function trustedHistoryToCsv(rows: TrustedReading[]): string {
   const lines = rows.map((r) =>
     [
       new Date(r.t).toISOString(),
       formatIst(r.t),
-      Math.round(r.distanceMm),
-      r.waterLevelFt.toFixed(3),
-      r.waterLevelM.toFixed(3),
-      r.capacityPct.toFixed(2),
-      r.alertLevel,
+      Number.isFinite(r.distanceMm) ? Math.round(r.distanceMm) : "",
+      r.fault ? "" : r.waterLevelFt.toFixed(3),
+      r.fault ? "" : r.waterLevelM.toFixed(3),
+      r.fault ? "" : r.capacityPct.toFixed(2),
+      r.fault ? "" : r.alertLevel,
       r.temperatureC ?? "",
       r.pressureHpa ?? "",
       r.batteryVoltage ?? "",
       r.signalStrength ?? "",
+      statusText(r),
     ].join(","),
   );
   return [CSV_COLUMNS.join(","), ...lines].join("\r\n");
@@ -152,24 +220,29 @@ export function trustedHistoryToCsv(rows: TrustedReading[]): string {
  */
 export function trustedHistorySheet(rows: TrustedReading[]): SheetSpec<TrustedReading> {
   return {
-    sheetName: "Trusted readings",
+    sheetName: "Readings",
     rows,
     columns: [
       { header: "Time (IST)", value: (r) => formatIst(r.t), align: "left" },
       { header: "Time (UTC)", value: (r) => new Date(r.t).toISOString(), align: "left" },
-      { header: "Air gap (mm)", value: (r) => Math.round(r.distanceMm), numFmt: "0" },
-      { header: "Water level (ft)", value: (r) => r.waterLevelFt, numFmt: "0.000" },
-      { header: "Water level (m)", value: (r) => r.waterLevelM, numFmt: "0.000" },
-      { header: "Capacity (%)", value: (r) => r.capacityPct, numFmt: "0.00" },
+      {
+        header: "Air gap (mm)",
+        value: (r) => (Number.isFinite(r.distanceMm) ? Math.round(r.distanceMm) : null),
+        numFmt: "0",
+      },
+      { header: "Water level (ft)", value: (r) => (r.fault ? null : r.waterLevelFt), numFmt: "0.000" },
+      { header: "Water level (m)", value: (r) => (r.fault ? null : r.waterLevelM), numFmt: "0.000" },
+      { header: "Capacity (%)", value: (r) => (r.fault ? null : r.capacityPct), numFmt: "0.00" },
       {
         header: "Alert band",
-        value: (r) => ALERT_LEVEL_LABEL[r.alertLevel],
+        value: (r) => (r.fault ? null : ALERT_LEVEL_LABEL[r.alertLevel]),
         align: "center",
       },
       { header: "Temperature (°C)", value: (r) => r.temperatureC, numFmt: "0.0" },
       { header: "Pressure (hPa)", value: (r) => r.pressureHpa, numFmt: "0.00" },
       { header: "Battery (V)", value: (r) => r.batteryVoltage, numFmt: "0.00" },
       { header: "Signal (CSQ 0-31)", value: (r) => r.signalStrength, numFmt: "0" },
+      { header: "Status", value: (r) => statusText(r), align: "left" },
     ],
   };
 }

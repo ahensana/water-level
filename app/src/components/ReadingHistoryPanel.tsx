@@ -3,8 +3,9 @@ import { SITE_CONFIG } from "../config";
 import { downloadCsv } from "../lib/csvExport";
 import { downloadXlsx } from "../lib/excelExport";
 import { fetchReadingsBetween } from "../lib/firebase";
+import { FAULT_CODE_LABEL } from "../lib/sensorQuality";
 import {
-  buildTrustedHistory,
+  buildAllReadings,
   DEFAULT_FILTERS,
   filterTrustedHistory,
   isFilterActive,
@@ -14,14 +15,14 @@ import {
   type HistoryFilters,
   type TrustedReading,
 } from "../lib/readingHistory";
-import { ALERT_LEVEL_SHORT, replayAlertLevels } from "../lib/waterLevel";
-import type { AlertLevel, RawWaterMonitorReading, SessionHistoryPoint } from "../types";
+import { ALERT_LEVEL_SHORT } from "../lib/waterLevel";
+import type { AlertLevel, FaultCode, RawWaterMonitorReading } from "../types";
 
 interface ReadingHistoryPanelProps {
   open: boolean;
   onClose: () => void;
-  /** Already-loaded session history, shown until a wider range is requested. */
-  sessionHistory: SessionHistoryPoint[];
+  /** Raw readings already loaded this session, shown until a wider range is requested. */
+  rawHistory: RawWaterMonitorReading[];
 }
 
 type Status = "session" | "loading" | "ready" | "error";
@@ -46,8 +47,13 @@ const PRESETS = [
  */
 const LARGE_RANGE_MS = 31 * 86_400_000;
 const BANDS: AlertLevel[] = ["normal", "warning", "critical"];
+const STATUSES: { value: HistoryFilters["status"]; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "trusted", label: "Trusted" },
+  { value: "rejected", label: "Rejected" },
+];
 
-export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHistoryPanelProps) {
+export function ReadingHistoryPanel({ open, onClose, rawHistory }: ReadingHistoryPanelProps) {
   const headingId = useId();
 
   const [fromLocal, setFromLocal] = useState(() => toLocalInput(Date.now() - 24 * 3600_000));
@@ -126,10 +132,7 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
 
   // Until a range is pulled, browse what the dashboard already holds — the panel
   // is useful the instant it opens rather than after a round trip.
-  const allRows = useMemo<TrustedReading[]>(() => {
-    if (fetched) return buildTrustedHistory(fetched);
-    return annotateSessionHistory(sessionHistory);
-  }, [fetched, sessionHistory]);
+  const allRows = useMemo<TrustedReading[]>(() => buildAllReadings(fetched ?? rawHistory), [fetched, rawHistory]);
 
   const rows = useMemo(() => filterTrustedHistory(allRows, filters), [allRows, filters]);
   const summary = useMemo(() => summarizeHistory(rows), [rows]);
@@ -155,10 +158,10 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-t-xl border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-700 dark:bg-neutral-800">
           <div>
             <h2 id={headingId} className="text-sm font-semibold text-neutral-900 dark:text-white">
-              Trusted Reading History
+              Reading History
             </h2>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Every reading the dashboard trusts, for any period
+              Every reading received, for any period — rejected ones marked with why
             </p>
           </div>
           <button
@@ -208,16 +211,6 @@ export function ReadingHistoryPanel({ open, onClose, sessionHistory }: ReadingHi
       </div>
     </div>
   );
-}
-
-/**
- * Session points are already trusted output of the same pipeline, so they only
- * need the alert band attaching — re-deriving them would mean re-fetching raw
- * readings the app has already processed.
- */
-function annotateSessionHistory(history: SessionHistoryPoint[]): TrustedReading[] {
-  const levels = replayAlertLevels(history.map((p) => p.waterLevelFt));
-  return history.map((point, i) => ({ ...point, alertLevel: levels[i] }));
 }
 
 // ------------------------------------------------------------------ period
@@ -375,6 +368,31 @@ function FilterBar({
 
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <div>
+          <span className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">Readings</span>
+          <div className="flex gap-1.5" role="radiogroup" aria-label="Readings">
+            {STATUSES.map((s) => {
+              const active = filters.status === s.value;
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => onChange({ ...filters, status: s.value })}
+                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+                    active
+                      ? "border-primary-500 bg-primary-500 text-white"
+                      : "border-neutral-300 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
           <span className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
             Alert band
           </span>
@@ -457,6 +475,13 @@ function FilterBar({
         </label>
       </div>
 
+      {filters.status !== "trusted" &&
+        (filters.alertLevels.length > 0 || filters.minLevelFt !== null || filters.maxLevelFt !== null) && (
+          <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+            Rejected readings have no level or band, so they are hidden while filtering by either.
+          </p>
+        )}
+
       {filters.fromHour !== null &&
         filters.toHour !== null &&
         filters.fromHour > filters.toHour && (
@@ -515,16 +540,30 @@ function SummaryBar({
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-900/60">
       <div className="text-xs text-neutral-600 dark:text-neutral-300">
         {summary === null ? (
-          <span>No trusted readings match the current filters.</span>
+          <span>No readings match the current filters.</span>
         ) : (
           <>
-            <strong className="tabular-nums">{summary.count.toLocaleString()}</strong>
-            {isFilterActive(filters) && <> of {total.toLocaleString()}</>} trusted reading
-            {summary.count === 1 ? "" : "s"} ·{" "}
-            <span className="tabular-nums">
-              {summary.minFt.toFixed(2)}–{summary.maxFt.toFixed(2)} ft
-            </span>{" "}
-            (median <span className="tabular-nums">{summary.medianFt.toFixed(2)}</span>) ·{" "}
+            <strong className="tabular-nums">{(summary.count + summary.rejectedCount).toLocaleString()}</strong>
+            {isFilterActive(filters) && <> of {total.toLocaleString()}</>} reading
+            {summary.count + summary.rejectedCount === 1 ? "" : "s"} ·{" "}
+            <span className="tabular-nums">{summary.count.toLocaleString()} trusted</span>
+            {summary.rejectedCount > 0 && (
+              <>
+                ,{" "}
+                <span className="font-semibold tabular-nums text-critical-700 dark:text-critical-500">
+                  {summary.rejectedCount.toLocaleString()} rejected
+                </span>
+              </>
+            )}{" "}
+            ·{" "}
+            {summary.count > 0 && (
+              <>
+                <span className="tabular-nums">
+                  {summary.minFt.toFixed(2)}–{summary.maxFt.toFixed(2)} ft
+                </span>{" "}
+                (median <span className="tabular-nums">{summary.medianFt.toFixed(2)}</span>) ·{" "}
+              </>
+            )}
             {formatStamp(summary.firstMs)} → {formatStamp(summary.lastMs)}
             {(summary.bandCounts.warning > 0 || summary.bandCounts.critical > 0) && (
               <>
@@ -551,7 +590,7 @@ function SummaryBar({
             setExporting(true);
             try {
               await downloadXlsx(
-                `trusted-reading-history-${new Date().toISOString().slice(0, 10)}`,
+                `reading-history-${new Date().toISOString().slice(0, 10)}`,
                 trustedHistorySheet(rows),
               );
             } finally {
@@ -567,7 +606,7 @@ function SummaryBar({
           disabled={rows.length === 0}
           onClick={() =>
             downloadCsv(
-              `trusted-reading-history-${new Date().toISOString().slice(0, 10)}`,
+              `reading-history-${new Date().toISOString().slice(0, 10)}`,
               trustedHistoryToCsv(rows),
             )
           }
@@ -582,49 +621,26 @@ function SummaryBar({
 }
 
 /**
- * Every filtered reading is in the table, but only the rows near the viewport
- * are mounted.
+ * The filtered readings, 200 to a page.
  *
- * The table used to page 300 rows at a time behind a "Show more" button, which
- * made "how many readings were below 3200 ft in August" a clicking exercise.
- * Mounting them all instead is not an option either: a month at 30-second
- * cadence is ~89,000 rows, and eleven cells each is enough DOM to freeze the
- * tab. Windowing gives the honest answer — the scrollbar spans the whole
- * record — at the cost of every row having the same height, which is why the
- * cells below are single-line.
+ * Every page is reachable directly (first / previous / page number / next /
+ * last), so a month at 5-minute cadence is ~45 pages, not a long scroll, and
+ * only one page's rows are ever in the DOM. The summary bar above still
+ * counts and exports the whole filtered set, not just the page on screen.
  */
-const ROW_HEIGHT_PX = 30; // first-paint estimate; the real height is measured
-const VIEWPORT_PX = 448; // matches the h-[28rem] container
-const OVERSCAN_ROWS = 12;
+const PAGE_SIZE = 200;
 
 function HistoryTable({ rows }: { rows: TrustedReading[] }) {
-  // Scroll position is this component's only state, and the caller keys it on
-  // the filtered set: narrowing a filter remounts the table at the top rather
-  // than leaving the view parked in rows that no longer exist.
-  const [scrollTop, setScrollTop] = useState(0);
+  // The caller keys this on the filtered set, so changing a filter remounts it
+  // on page 1 rather than leaving it on a page that may no longer exist.
+  const [page, setPage] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
 
-  /**
-   * Row height is measured from the first rendered row, not assumed.
-   *
-   * The spacer rows above and below the window are sized in pixels, so if the
-   * assumed height is off by even a pixel the error compounds — a few hundred
-   * rows in, the scrollbar and the rows disagree and the last readings become
-   * unreachable. Cell padding, the row border and the browser's font settings
-   * all move that number, so it is read from the DOM once and corrected if the
-   * page is zoomed. The constant is only the first-paint estimate.
-   */
-  const [rowHeightPx, setRowHeightPx] = useState(ROW_HEIGHT_PX);
-  const measureRow = useCallback((el: HTMLTableRowElement | null) => {
-    if (!el) return;
-    const measured = el.getBoundingClientRect().height;
-    if (measured > 0) {
-      setRowHeightPx((prev) => (Math.abs(prev - measured) > 0.5 ? measured : prev));
-    }
-  }, []);
-
-  // The container height is fixed below, so the viewport needs no measuring.
-  const viewportPx = VIEWPORT_PX;
+  const goTo = (p: number) => {
+    setPage(Math.min(pageCount - 1, Math.max(0, p)));
+    scrollRef.current?.scrollTo({ top: 0 });
+  };
 
   if (rows.length === 0) {
     return (
@@ -634,19 +650,14 @@ function HistoryTable({ rows }: { rows: TrustedReading[] }) {
     );
   }
 
-  const firstRow = Math.max(0, Math.floor(scrollTop / rowHeightPx) - OVERSCAN_ROWS);
-  const lastRow = Math.min(
-    rows.length,
-    firstRow + Math.ceil(viewportPx / rowHeightPx) + OVERSCAN_ROWS * 2,
-  );
-  const padTopPx = firstRow * rowHeightPx;
-  const padBottomPx = (rows.length - lastRow) * rowHeightPx;
+  const firstRow = page * PAGE_SIZE;
+  const lastRow = Math.min(rows.length, firstRow + PAGE_SIZE);
 
   return (
     <>
+      <Pager page={page} pageCount={pageCount} firstRow={firstRow} lastRow={lastRow} total={rows.length} onGoTo={goTo} />
       <div
         ref={scrollRef}
-        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         className="h-[28rem] overflow-auto rounded-lg border border-neutral-200 dark:border-neutral-700"
       >
         <table className="w-full text-left text-xs">
@@ -664,36 +675,88 @@ function HistoryTable({ rows }: { rows: TrustedReading[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100 dark:divide-neutral-700">
-            {padTopPx > 0 && <tr style={{ height: padTopPx }} aria-hidden="true" />}
-            {rows.slice(firstRow, lastRow).map((r, i) => (
-              <tr
-                key={r.t}
-                ref={i === 0 ? measureRow : undefined}
-                className="whitespace-nowrap hover:bg-neutral-50 dark:hover:bg-neutral-700/40"
-              >
+            {rows.slice(firstRow, lastRow).map((r) => (
+              <tr key={r.t} className="whitespace-nowrap hover:bg-neutral-50 dark:hover:bg-neutral-700/40">
                 <Td>{formatStamp(r.t, true)}</Td>
-                <Td right>{Math.round(r.distanceMm)} mm</Td>
-                <Td right strong>
-                  {r.waterLevelFt.toFixed(2)}
+                <Td right>{Number.isFinite(r.distanceMm) ? `${Math.round(r.distanceMm)} mm` : "—"}</Td>
+                <Td right strong={!r.fault}>
+                  {r.fault ? "—" : r.waterLevelFt.toFixed(2)}
                 </Td>
-                <Td right>{r.waterLevelM.toFixed(2)}</Td>
-                <Td right>{r.capacityPct.toFixed(2)}%</Td>
-                <Td>
-                  <BandBadge level={r.alertLevel} />
-                </Td>
+                <Td right>{r.fault ? "—" : r.waterLevelM.toFixed(2)}</Td>
+                <Td right>{r.fault ? "—" : `${r.capacityPct.toFixed(2)}%`}</Td>
+                <Td>{r.fault ? <RejectedBadge fault={r.fault} /> : <BandBadge level={r.alertLevel} />}</Td>
                 <Td right>{r.temperatureC === null ? "—" : `${r.temperatureC.toFixed(1)}°`}</Td>
                 <Td right>{r.batteryVoltage === null ? "—" : `${r.batteryVoltage.toFixed(2)} V`}</Td>
                 <Td right>{r.signalStrength === null ? "—" : `${r.signalStrength}/31`}</Td>
               </tr>
             ))}
-            {padBottomPx > 0 && <tr style={{ height: padBottomPx }} aria-hidden="true" />}
           </tbody>
         </table>
       </div>
-      <p className="text-center text-xs text-neutral-500 dark:text-neutral-400">
-        Showing all {rows.length.toLocaleString()} rows — scroll the table
-      </p>
+      <Pager page={page} pageCount={pageCount} firstRow={firstRow} lastRow={lastRow} total={rows.length} onGoTo={goTo} />
     </>
+  );
+}
+
+function Pager({
+  page,
+  pageCount,
+  firstRow,
+  lastRow,
+  total,
+  onGoTo,
+}: {
+  page: number;
+  pageCount: number;
+  firstRow: number;
+  lastRow: number;
+  total: number;
+  onGoTo: (page: number) => void;
+}) {
+  const btn =
+    "rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-neutral-600 dark:text-neutral-200 dark:hover:bg-neutral-700";
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+        Rows {(firstRow + 1).toLocaleString()}–{lastRow.toLocaleString()} of {total.toLocaleString()}
+      </p>
+      <div className="flex items-center gap-1.5">
+        <button type="button" className={btn} disabled={page === 0} onClick={() => onGoTo(0)} aria-label="First page">
+          «
+        </button>
+        <button type="button" className={btn} disabled={page === 0} onClick={() => onGoTo(page - 1)}>
+          ‹ Prev
+        </button>
+        <label className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400">
+          Page
+          <select
+            value={page}
+            onChange={(e) => onGoTo(Number(e.target.value))}
+            aria-label="Page"
+            className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-xs tabular-nums text-neutral-900 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100"
+          >
+            {Array.from({ length: pageCount }, (_, i) => (
+              <option key={i} value={i}>
+                {i + 1}
+              </option>
+            ))}
+          </select>
+          of {pageCount.toLocaleString()}
+        </label>
+        <button type="button" className={btn} disabled={page >= pageCount - 1} onClick={() => onGoTo(page + 1)}>
+          Next ›
+        </button>
+        <button
+          type="button"
+          className={btn}
+          disabled={page >= pageCount - 1}
+          onClick={() => onGoTo(pageCount - 1)}
+          aria-label="Last page"
+        >
+          »
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -707,6 +770,14 @@ function BandBadge({ level }: { level: AlertLevel }) {
   return (
     <span className={`rounded px-1.5 py-px text-[10px] font-semibold uppercase ${tone}`}>
       {ALERT_LEVEL_SHORT[level]}
+    </span>
+  );
+}
+
+function RejectedBadge({ fault }: { fault: FaultCode }) {
+  return (
+    <span className="rounded bg-neutral-200 px-1.5 py-px text-[10px] font-semibold uppercase text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+      Rejected · {FAULT_CODE_LABEL[fault]}
     </span>
   );
 }

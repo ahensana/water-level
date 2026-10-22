@@ -90,7 +90,7 @@ function App() {
             <section aria-label="Alert monitoring">
               <AlertPanel
                 reading={reading}
-                history={history}
+                rawHistory={rawHistory}
                 loadState={loadState}
                 quality={quality}
                 onOpenHistory={() => setHistoryOpen(true)}
@@ -136,7 +136,7 @@ function App() {
       <ReadingHistoryPanel
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        sessionHistory={history}
+        rawHistory={rawHistory}
       />
 
       <SensorCard
