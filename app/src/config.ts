@@ -7,13 +7,14 @@
  *   waterLevelFt = sensorElevationFt − (distanceMm / 1000) × 3.28084
  *
  * Sensor elevation is fitted as `loggedLevelFt + distanceMm × (3.28084 / 1000)`
- * against the register pages in `RealDataFromSite/`. Re-fitted 7 Oct 2026.
+ * against the register pages in `RealDataFromSite/`. Re-fitted 22 Oct 2026.
  *
- * THE MOUNT IS NOT HOLDING. Four different elevations fit four periods:
+ * THE MOUNT IS NOT HOLDING. Five different elevations fit five periods:
  *   5 Aug - 1 Sep  3212.16 ft   9 steady days
  *   11 - 16 Sep    3204.73 ft   1 steady day
  *   28 Sep         3209.04 ft   1 steady hour
- *   6 - 7 Oct      3208.75 ft   22 steady hours   <- in use
+ *   6 - 7 Oct      3208.75 ft   22 steady hours
+ *   22 Oct         3208.57 ft   75 min, against a flat register   <- in use
  * and the days between never agreed either (21 Sep implies 3205.7, 25 Sep
  * 3205.0). The register moved 0.24 ft across 27-28 Sep while the sensor's
  * air gap moved 4.3 ft, so this is the sensor shifting, not the reservoir.
@@ -25,6 +26,16 @@
  * 340-2900 mm within single hours) and then silent until 5 Oct, so the sensor
  * was likely disturbed again; it is treated as a new epoch, not a correction
  * to the 28 Sep one.
+ *
+ * The 22 Oct fit follows a week with the sensor blocked: 304 mm flat from
+ * 17:00 15 Oct, then the A01's 250 mm blind-zone value from 19 Oct until
+ * ~13:05 22 Oct, when it was evidently cleared on site and came back at
+ * 1724-1746 mm. No filled-in register hour overlaps the recovered readings
+ * (the last is 1 PM, while the sensor was still blocked), so the fit assumes
+ * the level held at 3202.88 ft — the register read exactly that at 11 AM,
+ * noon and 1 PM. Median of 15 readings 13:26-14:40 IST, 1735 mm. Against the
+ * 7 Oct constant those read 0.18 ft high, so the mount moved again. THIN:
+ * re-fit once the afternoon's register entries are filled in.
  *
  * Treat the constant as a running correction for a mount that keeps moving,
  * not as a calibration. It is right the day it is fitted and drifts after.
@@ -82,14 +93,14 @@ export const SITE_CONFIG = {
 
   /**
    * Elevation of the A01 sensor face on the same staff-gauge datum (ft), as
-   * fitted for the CURRENT mount position (7 Oct 2026, 978.03 m).
+   * fitted for the CURRENT mount position (22 Oct 2026, 977.97 m).
    *
    * Use this only for "what is the sensor set to now" — the QA card, the
    * report header, the trend chart's axis. Converting a stored reading goes
    * through `distanceToWaterLevelFt(mm, atMs)`, which picks the elevation that
    * was true when the reading was taken: see CALIBRATION_EPOCHS below.
    */
-  sensorElevationFt: 3208.75,
+  sensorElevationFt: 3208.57,
 
   /** Warning band begins at this staff-gauge level (ft). */
   warningLevelFt: 3200,
@@ -169,8 +180,17 @@ export const SITE_CONFIG = {
   /** Rejected samples must agree within this to count as a sustained step (mm). */
   resyncSpreadMm: 40,
 
-  /** ...and there must be at least this many of them. */
-  resyncMinSamples: 20,
+  /**
+   * ...and there must be at least this many of them.
+   *
+   * The hour above is the real guard; this only stops a handful of samples
+   * from qualifying. It was 20 while the device reported every 30 s, but at
+   * the current ~5-minute cadence an hour holds only ~12 readings, so 20 made
+   * recovery take ~100 minutes: on 22 Oct a single stray 367 mm reading during
+   * a site visit kept the dashboard on 3207.55 ft long after the sensor was
+   * reading correctly again.
+   */
+  resyncMinSamples: 10,
 
   /**
    * Max realistic staff-gauge change rate (ft/hour). Reservoirs do not jump
@@ -217,10 +237,10 @@ export const SITE_CONFIG = {
    * Regenerate with `npx tsx tools/pipelineCheck.ts` after any re-fit.
    */
   calibration: {
-    basis: "22 hourly register entries, 10 AM 6 Oct - 10 AM 7 Oct 2026",
+    basis: "15 readings, 1:26-2:40 PM 22 Oct 2026, against the register's flat 3202.88 ft (11 AM - 1 PM)",
     /** Median app-vs-logbook error at this constant (ft), over the fitted window. */
-    medianErrorFt: 0.001,
-    /** Std. dev. of that error (ft), from the pipeline replay over the fitted window. */
+    medianErrorFt: 0.0,
+    /** Std. dev. of that error (ft): 5 mm of sensor spread across the window. */
     residualStdFt: 0.018,
     /**
      * Repeating daily oscillation the logbook does not record (ft). Measured
@@ -230,9 +250,10 @@ export const SITE_CONFIG = {
     diurnalSwingFt: 0.119,
     /**
      * Worst single deviation from the register across the calibration window
-     * (ft), from the app pipeline replay. Small because the window is one
-     * steady day: measured across a mount that has moved three times since
-     * August, the figure that matters is that drift, not this one.
+     * (ft): the furthest of the 15 fitted readings from their median (11 mm).
+     * Small because the window is 75 minutes: measured across a mount that
+     * has moved four times since August, the figure that matters is that
+     * drift, not this one.
      * Verification against the gauge is expected to
      * FAIL at the 0.3 ft `crossCheckToleranceFt` whenever it moves again —
      * that failure is the sensor's, and the tolerance should not be widened
@@ -294,6 +315,11 @@ export const CALIBRATION_EPOCHS = [
     fromMs: Date.parse("2026-10-03T00:00:00+05:30"),
     elevationFt: 3208.75,
     note: "After the 30 Sep - 2 Oct disturbance. Fitted on 22 register hours, 10 AM 6 Oct - 10 AM 7 Oct.",
+  },
+  {
+    fromMs: Date.parse("2026-10-22T13:05:00+05:30"),
+    elevationFt: 3208.57,
+    note: "After the sensor was cleared on site. Fitted on 1:26-2:40 PM 22 Oct against a flat 3202.88 ft register.",
   },
 ] as const;
 

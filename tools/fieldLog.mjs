@@ -153,6 +153,16 @@ export const FIELD_LOG = {
     null, null, null, null, null, null,
     null, null, null, null, null, null,
   ],
+  // 10 AM is overwritten (.88 / .89) and left out. 2-4 PM were blank when
+  // photographed. The sensor was blocked (250 mm) until ~1:05 PM, so none of
+  // these pair with a sensor reading; the 22 Oct fit assumes the flat 3202.88
+  // held into the afternoon.
+  "2026-10-22": [
+    null, null, null, null, null, null,
+    null, null, null, null, 3202.88, 3202.88,
+    3202.88, null, null, null, null, null,
+    null, null, null, null, null, null,
+  ],
 };
 
 /** Daily rainfall (mm) and season cumulative (mm) as recorded at ~8-9 AM. */

@@ -291,7 +291,7 @@ export function processMonitorPipeline(
   if (rejectRate > 0.25) faultCodes.add("high_reject_rate");
 
   const quality = resolveQuality(faultCodes, reading, rejectRate);
-  const message = qualityMessage(quality, faultCodes, longestGapMs, rejectRate);
+  const message = qualityMessage(quality, faultCodes);
 
   return {
     reading,
@@ -442,37 +442,18 @@ function resolveQuality(
   return "good";
 }
 
-function qualityMessage(
-  quality: DataQuality,
-  faults: Set<FaultCode>,
-  longestGapMs: number,
-  rejectRate: number,
-): string | null {
-  if (quality === "good") return null;
-  const parts: string[] = [];
-  if (faults.has("no_trusted_data")) {
-    parts.push(
-      "Level unavailable — no trusted reading for over an hour. Alerts are suppressed. " +
-        "Check A01 aim, mounting, and power.",
-    );
-  }
-  if (faults.has("data_gap")) {
-    const mins = Math.round(longestGapMs / 60_000);
-    parts.push(`Data gap detected (~${mins} min without trusted readings).`);
-  }
-  if (faults.has("spike")) {
-    parts.push("Unrealistic level jumps filtered (likely false echo).");
-  }
-  if (faults.has("blind_zone") || faults.has("no_echo")) {
-    parts.push("Blind-zone / no-echo samples rejected.");
-  }
-  if (faults.has("high_reject_rate")) {
-    parts.push(`${Math.round(rejectRate * 100)}% of samples rejected as invalid.`);
-  }
-  if (parts.length) return parts.join(" ");
-  // Stale and resync are deliberately silent; don't fall back to a generic banner for them alone.
-  const silent: FaultCode[] = ["stale", "resync"];
-  return [...faults].every((f) => silent.includes(f)) ? null : "Sensor data quality is degraded.";
+/**
+ * Banner text for the quality state. Only the one condition that changes what
+ * the dashboard can show — no trusted level at all — is announced. Gaps,
+ * rejected samples, spikes, staleness and resyncs stay visible in the QA
+ * chips and the reading history, but are deliberately kept out of the banner.
+ */
+function qualityMessage(quality: DataQuality, faults: Set<FaultCode>): string | null {
+  if (quality === "good" || !faults.has("no_trusted_data")) return null;
+  return (
+    "Level unavailable — no trusted reading for over an hour. Alerts are suppressed. " +
+    "Check A01 aim, mounting, and power."
+  );
 }
 
 function resolvePressure(value: number | undefined): number | null {
