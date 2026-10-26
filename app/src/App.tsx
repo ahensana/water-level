@@ -10,7 +10,6 @@ import { HeroStats } from "./components/HeroStats";
 import { HourlyGaugeCard } from "./components/HourlyGaugeCard";
 import { MastheadBar } from "./components/MastheadBar";
 import { ReadingHistoryPanel } from "./components/ReadingHistoryPanel";
-import { ReliabilityCalendarCard } from "./components/ReliabilityCalendarCard";
 import { ReportPanel } from "./components/ReportPanel";
 import { SensorCard } from "./components/SensorCard";
 import { StatusBanner } from "./components/StatusBanner";
@@ -120,18 +119,12 @@ function App() {
 
           <SectionDivider
             title="Historical & Time-Based Analysis"
-            subtitle="Patterns across the currently loaded history — daily rhythm and device reliability over time"
+            subtitle="Patterns across the currently loaded history — the daily rhythm of the water level"
           />
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <section aria-label="Diurnal water level profile">
-              <DiurnalProfileCard history={history} loadState={loadState} />
-            </section>
-
-            <section aria-label="Reporting reliability calendar">
-              <ReliabilityCalendarCard rawHistory={rawHistory} loadState={loadState} />
-            </section>
-          </div>
+          <section aria-label="Diurnal water level profile">
+            <DiurnalProfileCard history={history} loadState={loadState} />
+          </section>
 
           <SectionDivider
             title="Satellite & Weather"

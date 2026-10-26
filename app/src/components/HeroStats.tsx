@@ -72,8 +72,8 @@ function StatCard({
 export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
   if (loadState === "loading" || !reading) {
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
           <StatCardSkeleton key={i} />
         ))}
       </div>
@@ -105,17 +105,10 @@ export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
     ? `Last trusted reading · ${lastUpdatedRelative}`
     : "No trusted reading in the loaded history";
 
-  const qualityHint =
-    quality.quality === "good"
-      ? reading.isSmoothed
-        ? `Median of ${quality.liveSampleCount} samples · trusted`
-        : "Trusted reading"
-      : quality.message ?? "Degraded — filtered sensor noise";
-
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {unavailable && (
-        <p className="col-span-2 -mb-1 text-xs font-semibold text-warning-600 dark:text-warning-500 lg:col-span-5">
+        <p className="col-span-2 -mb-1 text-xs font-semibold text-warning-600 dark:text-warning-500 lg:col-span-4">
           Not current — {hasLastKnown ? "last trusted reading" : "no trusted reading"} shown below,{" "}
           {lastUpdatedAbsolute} ({lastUpdatedRelative}).
         </p>
@@ -165,15 +158,6 @@ export function HeroStats({ reading, loadState, quality }: HeroStatsProps) {
         }
         icon={<PercentIcon className="h-5 w-5" />}
         hint={unavailable ? staleHint : ALERT_LEVEL_LABEL[reading.alertLevel]}
-      />
-      <StatCard
-        label="Data Quality"
-        value={quality.quality === "good" ? "Good" : quality.quality === "degraded" ? "Degraded" : "Fault"}
-        accent={
-          quality.quality === "good" ? "success" : quality.quality === "degraded" ? "warning" : "critical"
-        }
-        icon={<PercentIcon className="h-5 w-5" />}
-        hint={qualityHint}
       />
       <StatCard
         label="Last Updated"
