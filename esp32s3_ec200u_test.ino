@@ -78,6 +78,7 @@ const char APN[] = "airteliot.com";
 // secrets.h next to this sketch (copy secrets.example.h; it is git-ignored).
 // The key must match the DEVICE_INGEST_KEY secret set on the functions.
 #include "secrets.h"
+#include "lora_link.h"  // Ra-02 sender for the LCD display unit
 const char UPLOAD_URL[] = INGEST_URL "?key=" DEVICE_INGEST_KEY;
 
 const unsigned long UPLOAD_INTERVAL_MS = 30000;
@@ -621,6 +622,7 @@ void setup() {
   sensor.begin(9600, SERIAL_8N1, SENSOR_RX_PIN, SENSOR_TX_PIN);
 
   setupBMP280();
+  loraSetup();  // before the modem, so the LCD gets data even if 4G fails
   powerOnModem();
 
   if (runSelfTest()) {
@@ -634,6 +636,7 @@ void setup() {
 
 void loop() {
   readSensor();
+  loraTick(lastDistanceMm, haveFreshReading());
 
   if (millis() - lastUploadMs >= UPLOAD_INTERVAL_MS) {
     lastUploadMs = millis();
